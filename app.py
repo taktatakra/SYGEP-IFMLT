@@ -449,8 +449,6 @@ if not st.session_state.logged_in:
                     st.rerun()
                 else:
                     st.error("❌ Identifiants incorrects")
-        
-        st.info("💡 **Compte par défaut**\nUsername: admin\nPassword: admin123")
         st.success("🌐 **Mode Multi-Utilisateurs Temps Réel Activé** - Tous les étudiants partagent les mêmes données !")
     
     st.stop()
@@ -1165,4 +1163,5 @@ with st.sidebar.expander("ℹ️ Info Session"):
     st.write("**Statut:** 🟢 Connecté")
     st.write("**Mode:** 🌐 Temps Réel")
     st.caption("Base de données partagée PostgreSQL/Supabase")
+
 
