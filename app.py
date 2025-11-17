@@ -1,20 +1,3 @@
-# Updated single-file app including full workflow, notifications, documents (PDF generation fallback),
-# and a simple "formateur" simulator. Designed to be self-contained and used as the single app.py
-# as requested (Option 1).
-#
-# Notes:
-# - Keeps previous authentication, DB pool, and modules.
-# - Adds new tables: notifications, workflow_tasks, workflow_history, documents, emails_log
-# - Adds notification center, workflow task creation & listing, simple PDF generation (fpdf optional),
-#   and a formateur simulator that can fake supplier deliveries and payments.
-# - Simple auto-refresh via HTML meta refresh (configurable).
-#
-# Requirements:
-# - Same as before plus optionally: fpdf (pip install fpdf)
-#
-# Security:
-# - Do NOT commit .env secrets. Use st.secrets or environment variables on Streamlit Cloud.
-
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
@@ -514,7 +497,7 @@ def update_task_status(task_id, new_status, by_user_id=None, note=None):
 
 # ========== NEW: Document generation (PDF) ==========
 def generate_order_pdf(order_id, doc_type="bon_commande", generated_by=None):
-    # Simple PDF generator; uses fpdf if available, otherwise writes a TXT file.
+    # Simple PDF generator; uses fpdf if available, otherwise returns bytes of a text file
     conn = get_connection()
     try:
         c = conn.cursor()
@@ -545,9 +528,8 @@ def generate_order_pdf(order_id, doc_type="bon_commande", generated_by=None):
             pdf.cell(100, 8, txt=f"Montant: {montant:.2f} €", ln=1)
             pdf.cell(100, 8, txt=f"Statut: {statut}", ln=1)
             # Save to buffer
-            buf = io.BytesIO()
-            pdf.output(buf)
-            buf.seek(0)
+            pdf_str = pdf.output(dest='S')
+            buf = io.BytesIO(pdf_str.encode('latin-1'))
             # Save metadata in DB (file_path left as placeholder)
             c.execute("INSERT INTO documents (doc_type, related_id, file_path, metadata, generated_by) VALUES (%s, %s, %s, %s, %s) RETURNING id",
                       (doc_type, order_id, filename, json.dumps({'generated_at': timestamp}), generated_by))
@@ -555,7 +537,7 @@ def generate_order_pdf(order_id, doc_type="bon_commande", generated_by=None):
             conn.commit()
             return {'doc_id': doc_id, 'filename': filename, 'bytes': buf.read()}
         else:
-            # fallback create a simple text file saved as .pdf (not real PDF)
+            # fallback create a simple text file saved as bytes
             content = f"{doc_type.upper()} - Commande #{order_id}\nClient: {client}\nProduit: {produit}\nQuantité: {quantite}\nPrix Unitaire: {prix:.2f} €\nMontant: {montant:.2f} €\nStatut: {statut}\n"
             buf = io.BytesIO(content.encode('utf-8'))
             c.execute("INSERT INTO documents (doc_type, related_id, file_path, metadata, generated_by) VALUES (%s, %s, %s, %s, %s) RETURNING id",
@@ -754,8 +736,9 @@ with st.sidebar.expander("🔔 Centre Notifications (rapide)"):
         for _, row in notifs.iterrows():
             created = row['created_at']
             is_read = row['is_read']
-            bold = "**" if not is_read else ""
-            st.write(f"{bold}{row['type'].upper()} - {row['message']} ({row['target_module'] or '—'}){bold}")
+            bold_start = "**" if not is_read else ""
+            bold_end = "**" if not is_read else ""
+            st.write(f"{bold_start}{row['type'].upper()} - {row['message']} ({row['target_module'] or '—'}){bold_end}")
             cols = st.columns([4,1])
             with cols[1]:
                 if not is_read:
@@ -827,6 +810,9 @@ elif menu == "Gestion des Clients":
                             log_access(st.session_state.user_id, "clients", f"Suppression ID:{client_id}")
                             st.success("✅ Client supprimé")
                             st.rerun()
+                        except Exception as e:
+                            st.error(f"Erreur suppression client: {e}")
+                            conn.rollback()
                         finally:
                             release_connection(conn)
         else:
@@ -850,6 +836,9 @@ elif menu == "Gestion des Clients":
                             log_access(st.session_state.user_id, "clients", f"Ajout: {nom}")
                             st.success(f"✅ Client '{nom}' ajouté !")
                             st.rerun()
+                        except Exception as e:
+                            st.error(f"Erreur ajout client: {e}")
+                            conn.rollback()
                         finally:
                             release_connection(conn)
                     else:
@@ -889,6 +878,9 @@ elif menu == "Gestion des Produits":
                             log_access(st.session_state.user_id, "produits", f"Ajustement stock ID:{prod_id}")
                             st.success("✅ Stock mis à jour")
                             st.rerun()
+                        except Exception as e:
+                            st.error(f"Erreur mise à jour stock: {e}")
+                            conn.rollback()
                         finally:
                             release_connection(conn)
         else:
@@ -913,6 +905,9 @@ elif menu == "Gestion des Produits":
                             log_access(st.session_state.user_id, "produits", f"Ajout: {nom}")
                             st.success(f"✅ Produit '{nom}' ajouté !")
                             st.rerun()
+                        except Exception as e:
+                            st.error(f"Erreur ajout produit: {e}")
+                            conn.rollback()
                         finally:
                             release_connection(conn)
                     else:
@@ -950,6 +945,9 @@ elif menu == "Gestion des Commandes":
                             create_notification(target_role='directeur', ntype='info', message=f"Commande #{cmd_id} -> {statut}", target_module='commandes', related_id=cmd_id)
                             st.success(f"Statut: {statut}")
                             st.rerun()
+                        except Exception as e:
+                            st.error(f"Erreur mise à jour statut: {e}")
+                            conn.rollback()
                         finally:
                             release_connection(conn)
         else:
@@ -987,6 +985,9 @@ elif menu == "Gestion des Commandes":
                                 create_workflow_task("preparation_commande", related_order_id=cmd_id, assigned_role="stock", payload={'quantite': quantite, 'produit_id': produit_id})
                                 st.success(f"✅ Commande créée ! Montant: {montant:.2f} €")
                                 st.rerun()
+                            except Exception as e:
+                                st.error(f"Erreur création commande: {e}")
+                                conn.rollback()
                             finally:
                                 release_connection(conn)
                         else:
@@ -1002,6 +1003,9 @@ elif menu == "Gestion des Commandes":
                                 create_workflow_task("approvisionnement", related_order_id=cmd_id, assigned_role="approvisionneur", payload={'quantite': quantite, 'produit_id': produit_id})
                                 create_notification(target_role="approvisionneur", ntype="alert", message=f"Commande #{cmd_id} nécessite approvisionnement pour produit {produit['nom']}", target_module="achats", related_id=cmd_id)
                                 st.warning(f"❌ Stock insuffisant ! Tâche d'approvisionnement créée (Commande #{cmd_id})")
+                            except Exception as e:
+                                st.error(f"Erreur création commande (appro): {e}")
+                                conn.rollback()
                             finally:
                                 release_connection(conn)
 
@@ -1084,16 +1088,43 @@ elif menu == "Mode Formateur":
                 create_notification(target_role='stock', ntype='info', message=f"Livraison simulée: +{quantite} unités sur produit ID {produit_id}", target_module='produits', related_id=produit_id)
                 log_access(st.session_state.user_id, "formateur", f"Simulated delivery for product {produit_id} qty {quantite}")
                 st.success("✅ Livraison simulée et stock mis à jour.")
+            except Exception as e:
+                st.error(f"Erreur simulation livraison: {e}")
+                conn.rollback()
+            finally:
+                release_connection(conn)
     st.divider()
     with st.form("form_simulate_payment"):
         order_id = st.number_input("Commande ID", min_value=1, step=1)
         montant = st.number_input("Montant payé", min_value=0.0, step=0.01, value=0.0)
         if st.form_submit_button("Simuler paiement client"):
-            create_notification(target_role='comptable', ntype='info', message=f"Paiement simulé pour commande #{order_id} montant {montant:.2f}€", target_module='comptabilite', related_id=order_id)
-            c = get_connection().cursor()
-            c.execute("INSERT INTO emails_log (recipient, subject, body, status) VALUES (%s, %s, %s, %s)", (st.session_state.username, f"Payment simulated order {order_id}", f"Payment of {montant}", "simulated"))
-            get_connection().commit()
-            st.success("✅ Paiement simulé et notifié.")
+            # Notification côté application
+            create_notification(target_role='comptable',
+                                ntype='info',
+                                message=f"Paiement simulé pour commande #{order_id} montant {montant:.2f}€",
+                                target_module='comptabilite',
+                                related_id=order_id)
+            # Opération DB sécurisée : obtenir la connexion, commit/rollback et toujours release
+            conn = get_connection()
+            try:
+                c = conn.cursor()
+                c.execute(
+                    "INSERT INTO emails_log (recipient, subject, body, status) VALUES (%s, %s, %s, %s)",
+                    (st.session_state.username,
+                     f"Payment simulated order {order_id}",
+                     f"Payment of {montant:.2f}",
+                     "simulated")
+                )
+                conn.commit()
+                st.success("✅ Paiement simulé et notifié.")
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except:
+                    pass
+                st.error(f"Erreur insertion emails_log: {e}")
+            finally:
+                release_connection(conn)
 
 elif menu == "Gestion des Utilisateurs":
     if not has_access("utilisateurs"):
@@ -1119,13 +1150,20 @@ elif menu == "Gestion des Utilisateurs":
                     if users[users['id']==user_id]['username'].iloc[0] == st.session_state.username:
                         st.error("❌ Impossible de vous auto-supprimer")
                     else:
-                        c = conn.cursor()
-                        c.execute("DELETE FROM utilisateurs WHERE id=%s", (user_id,))
-                        conn.commit()
-                        log_access(st.session_state.user_id, "utilisateurs", f"Suppression ID:{user_id}")
-                        st.success("✅ Utilisateur supprimé")
-                        st.rerun()
-        finally:
+                        try:
+                            c = conn.cursor()
+                            c.execute("DELETE FROM utilisateurs WHERE id=%s", (user_id,))
+                            conn.commit()
+                            log_access(st.session_state.user_id, "utilisateurs", f"Suppression ID:{user_id}")
+                            st.success("✅ Utilisateur supprimé")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erreur suppression utilisateur: {e}")
+                            conn.rollback()
+                        finally:
+                            release_connection(conn)
+        except Exception as e:
+            st.error(f"Erreur lecture utilisateurs: {e}")
             release_connection(conn)
     with tab2:
         st.subheader("🔑 Gérer les Permissions")
@@ -1150,17 +1188,23 @@ elif menu == "Gestion des Utilisateurs":
                 new_perms[mod] = {'lecture': lec, 'ecriture': ecr}
                 st.divider()
             if st.button("💾 Enregistrer Permissions", type="primary", use_container_width=True):
-                c.execute("DELETE FROM permissions WHERE user_id=%s", (user_sel,))
-                for mod, p in new_perms.items():
-                    if p['lecture'] or p['ecriture']:
-                        c.execute("INSERT INTO permissions (user_id, module, acces_lecture, acces_ecriture) VALUES (%s, %s, %s, %s)",
-                                  (user_sel, mod, p['lecture'], p['ecriture']))
-                conn.commit()
-                log_access(st.session_state.user_id, "utilisateurs", f"MAJ permissions ID:{user_sel}")
-                st.success("✅ Permissions mises à jour")
-                st.rerun()
-        finally:
+                try:
+                    c.execute("DELETE FROM permissions WHERE user_id=%s", (user_sel,))
+                    for mod, p in new_perms.items():
+                        if p['lecture'] or p['ecriture']:
+                            c.execute("INSERT INTO permissions (user_id, module, acces_lecture, acces_ecriture) VALUES (%s, %s, %s, %s)",
+                                      (user_sel, mod, p['lecture'], p['ecriture']))
+                    conn.commit()
+                    log_access(st.session_state.user_id, "utilisateurs", f"MAJ permissions ID:{user_sel}")
+                    st.success("✅ Permissions mises à jour")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erreur mise à jour permissions: {e}")
+                    conn.rollback()
+        except Exception as e:
+            st.error(f"Erreur gestion permissions: {e}")
             release_connection(conn)
+
     with tab3:
         st.subheader("📊 Logs d'Accès")
         conn = get_connection()
@@ -1183,6 +1227,8 @@ elif menu == "Gestion des Utilisateurs":
                     st.bar_chart(logs['username'].value_counts().head(10))
             else:
                 st.info("Aucun log")
+        except Exception as e:
+            st.error(f"Erreur lecture logs: {e}")
         finally:
             release_connection(conn)
 
