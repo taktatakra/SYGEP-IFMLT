@@ -3,6 +3,8 @@ pandas
 pillow
 psycopg2-binary
 python-dotenv
+fpdf==1.7.2
+
 
 
 
