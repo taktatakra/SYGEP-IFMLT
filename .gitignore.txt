@@ -1,0 +1,27 @@
+# Base de données locale
+*.db
+erp_database.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+
+# Environnements virtuels
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+.streamlit/secrets.toml
+
+
