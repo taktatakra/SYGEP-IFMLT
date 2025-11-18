@@ -230,8 +230,6 @@ def get_user_permissions(user_id):
 def has_access(module, access_type='lecture'):
     if st.session_state.role == "admin":
         return True
-    permissions = st.session_state.get(module, {'lecture': False, 'ecriture': False})
-    # Correction: st.session_state.get('permissions', {})
     permissions = st.session_state.get('permissions', {})
     module_perms = permissions.get(module, {'lecture': False, 'ecriture': False})
     return module_perms.get(access_type, False)
@@ -307,11 +305,24 @@ def get_achats():
     finally:
         release_connection(conn)
 
+@st.cache_data(ttl=60)
 def get_produits_stock_faible():
     conn = get_connection()
     try:
         df = pd.read_sql_query("SELECT * FROM produits WHERE stock <= seuil_alerte", conn)
         return df
+    finally:
+        release_connection(conn)
+
+# NOUVEAU: Fonction pour compter les commandes en attente (cache court pour l'actualisation)
+@st.cache_data(ttl=5) 
+def get_pending_orders_count():
+    conn = get_connection()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM commandes WHERE statut = 'En attente'")
+        count = c.fetchone()[0]
+        return count
     finally:
         release_connection(conn)
 
@@ -360,7 +371,7 @@ def delete_session_from_db(session_id):
     finally:
         release_connection(conn)
 
-# ========== FONCTION DE COMMANDE PUBLIQUE (NOUVEAU) ==========
+# ========== FONCTION DE COMMANDE PUBLIQUE ==========
 def page_passer_commande_publique():
     st.title("🛍️ Passer une Nouvelle Commande (Espace Client)")
     st.markdown("---")
@@ -449,6 +460,9 @@ def page_passer_commande_publique():
                     
                     st.success(f"✅ Commande envoyée avec succès ! Montant estimé: {montant_estime:.2f} €. Elle est en statut 'En attente' de validation interne.")
                     st.balloons()
+                    
+                    # 5. Invalider le cache pour actualiser immédiatement le compteur de notification
+                    get_pending_orders_count.clear()
                 else:
                     conn.rollback()
                     st.error(f"❌ Erreur: Stock insuffisant ! Disponible: {current_stock}")
@@ -490,6 +504,8 @@ if not st.session_state.logged_in:
 
 # ========== PAGE DE CONNEXION / COMMANDE PUBLIQUE (MODIFIÉ) ==========
 if not st.session_state.logged_in:
+    # ... (Le code de la page de connexion n'a pas changé, il est omis ici pour la concision) ...
+    
     col1, col2, col3 = st.columns([1, 3, 1])
     
     with col1:
@@ -616,6 +632,12 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
+# NOUVEAU: Affichage de la notification de commande en attente dans la sidebar
+pending_count = get_pending_orders_count()
+if pending_count > 0:
+    st.sidebar.error(f"🔔 **{pending_count} NOUVELLE(S) COMMANDE(S)** en attente de validation!")
+# Fin NOUVEAU
+
 # Afficher permissions
 if st.session_state.role != "admin":
     with st.sidebar.expander("🔑 Mes Permissions"):
@@ -659,6 +681,12 @@ if menu == "Tableau de Bord":
     
     log_access(st.session_state.user_id, "tableau_bord", "Consultation")
     st.header("📈 Tableau de Bord")
+    
+    # NOUVEAU: Notification URGENTE dans le Dashboard
+    pending_count = get_pending_orders_count()
+    if pending_count > 0:
+        st.error(f"🔔 **URGENT : {pending_count} NOUVELLE(S) COMMANDE(S) CLIENT EN ATTENTE !** Rendez-vous dans 'Gestion des Commandes' pour les valider.")
+    # Fin NOUVEAU
     
     produits_alerte = get_produits_stock_faible()
     if not produits_alerte.empty:
@@ -929,6 +957,11 @@ elif menu == "Gestion des Commandes":
                             conn.commit()
                             log_access(st.session_state.user_id, "commandes", f"MAJ statut ID:{cmd_id}")
                             st.success(f"Statut: {statut}")
+                            
+                            # NOUVEAU: Si le statut "En attente" est retiré, actualiser le compteur de notif.
+                            if statut != 'En attente':
+                                get_pending_orders_count.clear()
+                                
                             st.rerun()
                         finally:
                             release_connection(conn)
@@ -963,13 +996,16 @@ elif menu == "Gestion des Commandes":
                                 produit_id_py = int(produit_id)
                                 quantite_py = int(quantite)
                                 
+                                # Ici, une commande interne n'est pas forcément "En attente" du client,
+                                # mais pour la cohérence avec le flux, on la met en "En cours" ou "En attente"
+                                # pour l'exemple, on met "En cours"
                                 c.execute("""INSERT INTO commandes (client_id, produit_id, quantite, date, statut) 
-                                            VALUES (%s, %s, %s, CURRENT_DATE, 'En attente')""",
+                                            VALUES (%s, %s, %s, CURRENT_DATE, 'En cours')""",
                                           (client_id_py, produit_id_py, quantite_py))
                                 c.execute("UPDATE produits SET stock = stock - %s WHERE id = %s", (quantite_py, produit_id_py))
                                 conn.commit()
                                 montant = produit['prix'] * quantite
-                                log_access(st.session_state.user_id, "commandes", f"Création: {montant:.2f}€")
+                                log_access(st.session_state.user_id, "commandes", f"Création interne: {montant:.2f}€")
                                 st.success(f"✅ Commande créée ! Montant: {montant:.2f} €")
                                 st.rerun()
                             finally:
@@ -1245,7 +1281,7 @@ elif menu == "À Propos":
     
     ---
     
-    Version 3.0 - Multi-Utilisateurs Temps Réel
+    Version 3.1 - Ajout Notifications Commandes Client
     """)
 
 # Footer sidebar
@@ -1254,7 +1290,7 @@ date_footer = datetime.now().strftime('%d/%m/%Y')
 st.sidebar.markdown(f"""
 <div style="background-color: #f8fafc; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0;">
     <p style="margin: 0; font-size: 11px; color: #64748b; text-align: center;">
-        <strong style="color: #1e40af;">SYGEP v3.0</strong><br>
+        <strong style="color: #1e40af;">SYGEP v3.1</strong><br>
         🌐 Mode Temps Réel Activé
     </p>
     <hr style="margin: 10px 0; border: 0; border-top: 1px solid #cbd5e1;">
