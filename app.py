@@ -12,7 +12,7 @@ load_dotenv()
 
 # Configuration de la page
 st.set_page_config(
-    page_title="SYGEP - Système de Gestion d'Entreprise Pédagogique (v6.0)",
+    page_title="SYGEP - Système de Gestion d'Entreprise Pédagogique (v7.0 Adapté)",
     layout="wide",
     page_icon="🎓",
     initial_sidebar_state="expanded"
@@ -64,68 +64,65 @@ def hash_password(password):
 
 def log_access(entity_id, entity_type, module, action):
     """Enregistre l'action de l'utilisateur/client dans la table logs_access (uniquement pour les utilisateurs UUID)."""
+    # L'ID de l'entité doit exister et la table logs_access doit être créée.
     if entity_type == 'user' and 'user_id' in st.session_state:
         conn = get_connection()
         try:
             c = conn.cursor()
+            # Assurez-vous que la table logs_access existe dans votre DB
             c.execute("""
                 INSERT INTO logs_access (user_id, module, action) 
                 VALUES (%s, %s, %s)
             """, (entity_id, module, action))
             conn.commit()
         except Exception:
+            # Silent failure for logging errors
             pass
         finally:
             st.session_state.conn_pool.putconn(conn)
 
 
-def get_user_role_and_name(email, password_hash):
-    """Vérifie les identifiants de l'utilisateur interne."""
+def get_user_role_and_name(username, password_hash):
+    """
+    Vérifie les identifiants de l'utilisateur interne.
+    ADAPTÉ pour utiliser les colonnes 'username' et 'password' et récupérer le rôle string.
+    """
     conn = get_connection()
     try:
         c = conn.cursor()
         c.execute("""
-            SELECT u.id, u.nom_complet, r.nom AS role_name, r.id AS role_id
-            FROM utilisateurs u
-            JOIN roles r ON u.role_id = r.id
-            WHERE u.email = %s AND u.mot_de_passe = %s
-        """, (email, password_hash))
+            SELECT id, username, role
+            FROM utilisateurs
+            WHERE username = %s AND password = %s
+        """, (username, password_hash))
         
         user_data = c.fetchone()
         
         if user_data:
             user_id = str(user_data[0]) 
-            return user_id, user_data[1], user_data[2], user_data[3]
-        return None, None, None, None
-    finally:
-        st.session_state.conn_pool.putconn(conn)
-
-
-@st.cache_data(ttl=3600)
-def get_user_uuid_by_role(role_name):
-    """Récupère l'UUID du premier utilisateur ayant un rôle donné (utile pour la notification Admin)."""
-    conn = get_connection()
-    try:
-        c = conn.cursor()
-        c.execute("""
-            SELECT u.id
-            FROM utilisateurs u
-            JOIN roles r ON u.role_id = r.id
-            WHERE r.nom = %s
-            LIMIT 1
-        """, (role_name,))
-        result = c.fetchone()
-        return result[0] if result else None
+            # On utilise le username comme nom d'affichage par défaut
+            nom_complet = user_data[1] 
+            role_name = user_data[2] # Le rôle est un string (ex: 'vendeur')
+            return user_id, nom_complet, role_name
+        return None, None, None
     finally:
         st.session_state.conn_pool.putconn(conn)
 
 
 def has_access(module, access_type="lecture"):
-    """Vérifie les permissions de l'utilisateur."""
+    """
+    Vérifie les permissions de l'utilisateur. 
+    ADAPTÉ pour utiliser l'ID de l'utilisateur (user_id) au lieu du role_id (UBAC).
+    """
     if st.session_state.get('is_client'):
         return module in ["espace_client", "notifications", "dashboard"] 
 
-    if st.session_state.role_id == 1: # Admin a tout
+    # L'admin (rôle string 'admin') a accès à tout
+    if st.session_state.role_name == 'admin': 
+        return True
+    
+    # Si le module est 'dashboard' ou 'notifications', l'accès est toujours permis s'ils sont connectés
+    if module in ["dashboard", "notifications"]:
         return True
     
     conn = get_connection()
@@ -133,11 +130,12 @@ def has_access(module, access_type="lecture"):
         c = conn.cursor()
         access_column = "acces_lecture" if access_type == "lecture" else "acces_ecriture"
 
+        # On utilise user_id pour vérifier les permissions
         c.execute(f"""
             SELECT {access_column}
             FROM permissions
-            WHERE role_id = %s AND module = %s
-        """, (st.session_state.role_id, module))
+            WHERE user_id = %s AND module = %s
+        """, (st.session_state.user_id, module))
         
         permission = c.fetchone()
         
@@ -151,24 +149,25 @@ def has_access(module, access_type="lecture"):
 # ========== 3. FONCTIONS D'AUTHENTIFICATION ET DE DÉCONNEXION ==========
 
 def authenticate_internal():
-    """Authentification pour le personnel (avec mot de passe)."""
-    email = st.session_state.auth_email
+    """Authentification pour le personnel (avec username/email)."""
+    username = st.session_state.auth_username
     password = st.session_state.auth_password
     
     hashed_password = hash_password(password)
-    user_id, nom_complet, role_name, role_id = get_user_role_and_name(email, hashed_password)
+    # MODIFIÉ: role_id supprimé
+    user_id, nom_complet, role_name = get_user_role_and_name(username, hashed_password)
     
     if user_id:
         st.session_state.logged_in = True
-        st.session_state.is_client = False
+        st.session_state.is_client = False 
         st.session_state.user_id = user_id
         st.session_state.user_name = nom_complet
         st.session_state.role_name = role_name
-        st.session_state.role_id = role_id
+        # st.session_state.role_id est supprimé
         log_access(user_id, "user", "Authentification", "Connexion réussie")
         st.rerun()
     else:
-        st.session_state.login_error_internal = "Email ou mot de passe incorrect."
+        st.session_state.login_error_internal = "Nom d'utilisateur ou mot de passe incorrect."
 
 
 def authenticate_client():
@@ -185,17 +184,14 @@ def authenticate_client():
             client_id = client_data[0]
             client_name_db = client_data[1]
             
-            c.execute("SELECT id FROM roles WHERE nom = 'client' LIMIT 1") 
-            role_result = c.fetchone()
-            
-            role_id = role_result[0] if role_result else 99 
+            # Le rôle client est un rôle par défaut, le role_id n'est plus pertinent
             
             st.session_state.logged_in = True
             st.session_state.is_client = True 
             st.session_state.client_id = client_id
             st.session_state.user_name = client_name_db
             st.session_state.role_name = 'client'
-            st.session_state.role_id = role_id
+            # st.session_state.role_id est supprimé
             st.rerun()
         else:
             st.session_state.login_error_client = "Nom de client non trouvé."
@@ -211,9 +207,10 @@ def logout():
 
 
 # ========== 4. FONCTIONS DE GESTION DE DONNÉES (CRUD) ==========
+# Les fonctions CRUD suivantes ne dépendent pas des tables 'utilisateurs'/'roles' et restent inchangées.
+# Elles supposent que les tables 'clients', 'produits' et 'fournisseurs' existent avec les colonnes correspondantes.
 
 # --- CRUD Clients ---
-
 @st.cache_data(ttl=60)
 def get_clients():
     conn = get_connection()
@@ -259,7 +256,6 @@ def delete_client(client_id):
     conn = get_connection()
     try:
         c = conn.cursor()
-        # Suppression potentielle de commandes associées (ou utiliser CASCADE sur la DB)
         c.execute("DELETE FROM clients WHERE id=%s", (client_id,))
         conn.commit()
         get_clients.clear()
@@ -272,7 +268,6 @@ def delete_client(client_id):
         st.session_state.conn_pool.putconn(conn)
 
 # --- CRUD Produits ---
-
 @st.cache_data(ttl=60)
 def get_products():
     conn = get_connection()
@@ -329,11 +324,9 @@ def delete_product(product_id):
     finally:
         st.session_state.conn_pool.putconn(conn)
 
-# --- CRUD Fournisseurs (NOUVEAU) ---
-
+# --- CRUD Fournisseurs ---
 @st.cache_data(ttl=60)
 def get_fournisseurs():
-    """Récupère la liste de tous les fournisseurs."""
     conn = get_connection()
     try:
         fournisseurs_df = pd.read_sql_query("SELECT id, nom, contact, email FROM fournisseurs ORDER BY nom", conn)
@@ -342,7 +335,6 @@ def get_fournisseurs():
         st.session_state.conn_pool.putconn(conn)
 
 def insert_fournisseur(nom, contact, email):
-    """Ajoute un nouveau fournisseur."""
     conn = get_connection()
     try:
         c = conn.cursor()
@@ -359,7 +351,6 @@ def insert_fournisseur(nom, contact, email):
         st.session_state.conn_pool.putconn(conn)
         
 def update_fournisseur(fournisseur_id, nom, contact, email):
-    """Met à jour les informations d'un fournisseur existant."""
     conn = get_connection()
     try:
         c = conn.cursor()
@@ -376,11 +367,9 @@ def update_fournisseur(fournisseur_id, nom, contact, email):
         st.session_state.conn_pool.putconn(conn)
 
 def delete_fournisseur(fournisseur_id):
-    """Supprime un fournisseur."""
     conn = get_connection()
     try:
         c = conn.cursor()
-        # Suppression potentielle des achats associés (ou utiliser CASCADE sur la DB)
         c.execute("DELETE FROM fournisseurs WHERE id=%s", (fournisseur_id,))
         conn.commit()
         get_fournisseurs.clear()
@@ -395,9 +384,8 @@ def delete_fournisseur(fournisseur_id):
 
 # ========== 5. DÉFINITION DES MODULES DE L'APPLICATION (CRUD INTÉGRÉ) ==========
 
-# --- Module Gestion Fournisseurs (NOUVEAU - CRUD) ---
-
 def module_gestion_fournisseurs():
+    # La vérification des accès utilise maintenant le user_id et le module
     if not has_access("fournisseurs"):
         st.error("❌ Accès refusé à la Gestion Fournisseurs.")
         log_access(st.session_state.user_id, "user", "fournisseurs", "Tentative d'accès refusée")
@@ -693,7 +681,6 @@ def module_gestion_produits():
         else:
             st.info("Aucun produit à modifier.")
 
-
 # --- Autres modules (placeholders) ---
 
 def module_espace_client():
@@ -702,7 +689,7 @@ def module_espace_client():
         return
         
     st.header(f"🛒 Passez votre Commande, {st.session_state.user_name}")
-    st.info("Ce module nécessite la logique de commande complète.") # Placeholder for brevity
+    st.info("Ce module nécessite la logique de commande complète.") 
 
 def module_dashboard():
     st.title(f"🚀 Tableau de Bord - Bienvenue, {st.session_state.user_name.split()[0]}!")
@@ -720,7 +707,7 @@ def module_notifications():
         return
     st.header("🔔 Vos Notifications")
     log_access(st.session_state.user_id, "user", "notifications", "Consultation")
-    st.info("Affichage des notifications pour le personnel.") # Placeholder for brevity
+    st.info("Affichage des notifications pour le personnel.") 
 
 def module_placeholder(module_key, menu_label):
     if not has_access(module_key, "lecture"):
@@ -742,13 +729,14 @@ if not st.session_state.logged_in:
     st.image("https://upload.wikimedia.org/wikipedia/commons/0/0e/Ofppt.png", width=150)
     st.title("🎓 SYGEP - Connexion")
     
-    tab_interne, tab_client = st.tabs(["🔒 Personnel (Email/Mot de Passe)", "👤 Accès Client (Nom uniquement)"])
+    tab_interne, tab_client = st.tabs(["🔒 Personnel (Nom d'utilisateur/Mot de Passe)", "👤 Accès Client (Nom uniquement)"])
     
     with tab_interne:
         st.write("Réservé au personnel interne.")
         with st.form("login_form_internal"):
-            st.text_input("Email", key="auth_email")
-            st.text_input("Mot de passe", type="password", key="auth_password")
+            # MODIFIÉ: Utilisation de 'Nom d\'utilisateur' au lieu d'Email
+            st.text_input("Nom d'utilisateur (Ex: etudiant1)", key="auth_username") 
+            st.text_input("Mot de passe (Ex: pass1)", type="password", key="auth_password")
             submitted = st.form_submit_button("🔒 Se connecter")
             if submitted: authenticate_internal()
             if 'login_error_internal' in st.session_state and st.session_state.login_error_internal:
@@ -800,7 +788,8 @@ else:
             menu_options = internal_menu_options
             allowed_options = {}
             for label, module_key in menu_options.items():
-                if module_key == "dashboard" or has_access(module_key, "lecture"):
+                # Le dashboard et les notifications sont toujours visibles
+                if module_key == "dashboard" or module_key == "notifications" or has_access(module_key, "lecture"): 
                     allowed_options[label] = module_key
 
 
@@ -815,8 +804,8 @@ else:
         st.sidebar.markdown(f"""
         <div style="background-color: #f8fafc; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0;">
             <p style="margin: 0; font-size: 11px; color: #64748b; text-align: center;">
-                <strong style="color: #1e40af;">SYGEP v6.0</strong><br>
-                🌐 Mode Temps Réel Activé
+                <strong style="color: #1e40af;">SYGEP v7.0</strong><br>
+                🌐 Mode Adapté Activé
             </p>
             <hr style="margin: 10px 0; border: 0; border-top: 1px solid #cbd5e1;">
             <p style="margin: 0; font-size: 10px; color: #64748b; text-align: center;">
@@ -847,7 +836,7 @@ else:
         module_gestion_clients()
     elif current_module == "produits":
         module_gestion_produits()
-    elif current_module == "fournisseurs": # <-- Appel du nouveau module CRUD
+    elif current_module == "fournisseurs": 
         module_gestion_fournisseurs()
     else:
         module_placeholder(current_module, menu)
