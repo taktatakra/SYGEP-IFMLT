@@ -12,7 +12,7 @@ load_dotenv()
 
 # Configuration de la page
 st.set_page_config(
-    page_title="SYGEP - Système de Gestion d'Entreprise Pédagogique (v4.0)", # Version mise à jour
+    page_title="SYGEP - Système de Gestion d'Entreprise Pédagogique (v4.0)",
     layout="wide",
     page_icon="🎓",
     initial_sidebar_state="expanded"
@@ -63,9 +63,7 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def log_access(entity_id, entity_type, module, action):
-    """Enregistre l'action de l'utilisateur/client dans la table logs_access."""
-    # Seuls les utilisateurs internes (avec un UUID) sont loggués ici.
-    # Les logs clients (par nom) nécessiteraient une table de logs séparée ou une gestion spécifique.
+    """Enregistre l'action de l'utilisateur/client dans la table logs_access (uniquement pour les utilisateurs UUID)."""
     if entity_type == 'user':
         conn = get_connection()
         try:
@@ -123,16 +121,15 @@ def get_user_uuid_by_role(role_name):
 
 
 def has_access(module, access_type="lecture"):
-    """Vérifie les permissions de l'utilisateur interne."""
-    # Si c'est un client sans mot de passe, l'accès est géré par is_client dans le menu
+    """Vérifie les permissions de l'utilisateur interne. Limite l'accès pour les clients externes."""
+    # Si c'est un client sans mot de passe, l'accès est pré-défini
     if st.session_state.get('is_client'):
-        return module in ["espace_client", "notifications", "dashboard"] # Limite les modules accessibles
+        return module in ["espace_client", "notifications", "dashboard"] 
 
-    # L'Admin a toujours accès complet (role_id 1)
+    # Logique de permissions par rôle (pour le personnel interne)
     if st.session_state.role_id == 1:
         return True
     
-    # Récupérer les permissions du rôle de l'utilisateur
     conn = get_connection()
     try:
         c = conn.cursor()
@@ -191,16 +188,15 @@ def authenticate_client():
             client_id = client_data[0]
             client_name_db = client_data[1]
             
-            # Chercher le rôle 'client' (pour le nom affiché)
+            # Chercher le rôle 'client' (pour l'affichage)
             c.execute("SELECT id FROM roles WHERE nom = 'client' LIMIT 1") 
             role_result = c.fetchone()
             
-            # Si le rôle 'client' existe, on utilise son ID, sinon on utilise un ID factice
-            role_id = role_result[0] if role_result else 99 
+            role_id = role_result[0] if role_result else 99 # 99 est un ID factice si le rôle n'existe pas
             
             # Établir la session client
             st.session_state.logged_in = True
-            st.session_state.is_client = True # Flag spécifique
+            st.session_state.is_client = True 
             st.session_state.client_id = client_id # ID du client (INT)
             st.session_state.user_name = client_name_db # Nom du client
             st.session_state.role_name = 'client'
@@ -213,13 +209,13 @@ def authenticate_client():
 
 
 def logout():
-    if not st.session_state.get('is_client'):
+    if not st.session_state.get('is_client') and 'user_id' in st.session_state:
         log_access(st.session_state.user_id, "user", "Authentification", "Déconnexion")
     st.session_state.clear()
     st.rerun()
 
 
-# ========== 4. FONCTIONS DE RÉCUPÉRATION DE DONNÉES ET COMMANDE ==========
+# ========== 4. FONCTIONS DE DONNÉES ET COMMANDE (NOUVELLES) ==========
 
 @st.cache_data(ttl=60)
 def get_clients():
@@ -255,22 +251,20 @@ def create_notification(user_id, titre, message, ref_id=None, ref_type=None):
         st.session_state.conn_pool.putconn(conn)
 
 def get_notifications(user_id):
-    """Récupère les notifications pour l'utilisateur (UUID ou Client ID)."""
+    """Récupère les notifications pour l'utilisateur interne (UUID)."""
+    if st.session_state.get('is_client'):
+        return pd.DataFrame() 
+        
     conn = get_connection()
     try:
-        if st.session_state.get('is_client'):
-            # Les clients devraient voir des notifications basées sur leur client_id ou une autre table dédiée
-            # Pour l'instant, les clients n'ont pas de notifications dans cette implémentation simple (ils n'ont pas d'UUID)
-            return pd.DataFrame() 
-        else:
-            user_id_str = str(user_id) 
-            notifications_df = pd.read_sql_query(f"""
-                SELECT id, titre, message, date_creation, lu 
-                FROM notifications 
-                WHERE user_id = '{user_id_str}' 
-                ORDER BY date_creation DESC
-            """, conn)
-            return notifications_df
+        user_id_str = str(user_id) 
+        notifications_df = pd.read_sql_query(f"""
+            SELECT id, titre, message, date_creation, lu 
+            FROM notifications 
+            WHERE user_id = '{user_id_str}' AND lu = FALSE -- Récupère seulement les non lues pour l'affichage principal
+            ORDER BY date_creation DESC
+        """, conn)
+        return notifications_df
     finally:
         st.session_state.conn_pool.putconn(conn)
         
@@ -288,15 +282,13 @@ def mark_notification_as_read(notification_id):
         st.session_state.conn_pool.putconn(conn)
 
 def insert_client_order(client_id, createur_id_uuid, montant_total):
-    """Insère une nouvelle commande client. createur_id_uuid est l'UUID du créateur (Admin par défaut si c'est un client)."""
+    """Insère une nouvelle commande client."""
     conn = get_connection()
     try:
         c = conn.cursor()
         
         numero = f"CMD-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
-        # Assurez-vous que la colonne createur_id est NULLABLE dans la DB si vous voulez mettre NULL
-        # Sinon, nous utilisons l'UUID de l'Admin par défaut
         c.execute("""
             INSERT INTO commandes_workflow 
             (numero, client_id, date_creation, createur_id, montant_total, statut) 
@@ -316,27 +308,26 @@ def insert_client_order(client_id, createur_id_uuid, montant_total):
 
 # ========== 5. DÉFINITION DES MODULES DE L'APPLICATION ==========
 
-# --- Module Espace Client ---
+# --- Module Espace Client (LA FONCTIONNALITÉ DEMANDÉE) ---
 
 def module_espace_client():
-    # Accès pour le rôle 'client' et 'admin' (pour la démo)
+    """Permet au client externe de passer une commande sans s'authentifier comme utilisateur interne."""
     if not (st.session_state.get('is_client') or st.session_state.role_name == 'admin'):
         st.error("❌ Accès refusé à l'Espace Client.")
         return
         
     st.header(f"🛒 Passez votre Commande, {st.session_state.user_name}")
     
-    # 🚨 Logique spécifique pour les clients (non utilisateurs UUID)
     current_client_id = st.session_state.get('client_id')
     
     if not current_client_id:
         st.error("Erreur : Impossible d'identifier votre compte client.")
         return
 
-    # Récupérer l'UUID de l'Admin pour le champ createur_id (placeholer)
+    # Récupérer l'UUID de l'Admin pour le champ createur_id (pour le traçage)
     admin_uuid = get_user_uuid_by_role('admin')
     if not admin_uuid:
-        st.warning("Attention : L'utilisateur 'admin' est introuvable. Les commandes ne pourront pas être tracées correctement.")
+        st.warning("Attention : L'utilisateur 'admin' est introuvable. La commande sera créée mais sans créateur interne tracé.")
 
 
     products_df = get_products()
@@ -384,13 +375,12 @@ def module_espace_client():
             
             order_id, order_numero = insert_client_order(
                 client_id=current_client_id,
-                # Utilise l'UUID de l'Admin comme créateur si le client n'a pas d'UUID
-                createur_id_uuid=admin_uuid, 
+                createur_id_uuid=admin_uuid, # Utilise l'UUID de l'Admin par défaut
                 montant_total=total_amount
             )
             
             if order_id:
-                # 2. Créer une notification pour l'Admin (si l'UUID a été trouvé)
+                # Créer une notification pour l'Admin
                 if admin_uuid:
                     create_notification(
                         user_id=admin_uuid, 
@@ -406,28 +396,30 @@ def module_espace_client():
     else:
         st.info("Ajoutez des articles pour passer la commande.")
 
-# --- Autres modules (raccourcis) ---
+# --- Module Tableau de Bord (Ajusté pour le client) ---
+
 def module_dashboard():
-    # ... (le contenu existant du dashboard)
     st.title(f"🚀 Tableau de Bord - Bienvenue, {st.session_state.user_name.split()[0]}!")
     if not st.session_state.get('is_client'):
         log_access(st.session_state.user_id, "user", "Dashboard", "Consultation")
         st.markdown(f"**Rôle actuel :** `{st.session_state.role_name.upper()}`")
     else:
-        st.info("Mode Client Actif. Accès limité aux commandes.")
+        st.info("Mode Client Actif. Utilisez l'option 'Passer Commande' pour commencer.")
     st.divider()
-    # ... (le reste du dashboard)
     
+# --- Module Notifications (Ajusté pour le client) ---
+
 def module_notifications():
-    # ... (le contenu existant des notifications)
     if st.session_state.get('is_client'):
-        st.info("Les notifications ne sont pas disponibles pour l'accès client non authentifié.")
+        st.header("🔔 Suivi des Commandes")
+        st.info("Ce module est en cours de développement. Vous y verrez bientôt le statut de vos commandes.")
         return
+        
     st.header("🔔 Vos Notifications")
     log_access(st.session_state.user_id, "user", "notifications", "Consultation")
     
     notifications = get_notifications(st.session_state.user_id)
-    # ... (le reste du module de notification)
+    
     if notifications.empty:
         st.info("Aucune notification non lue.")
         return
@@ -467,7 +459,16 @@ def module_notifications():
     if st.button("Afficher toutes les notifications"):
         st.info("Ici, vous afficherez toutes les notifications (lues et non lues).")
 
-# Placeholder pour les autres modules
+# --- Placeholders pour les modules internes ---
+
+def module_gestion_clients():
+    st.header("👥 Gestion des Clients")
+    st.info("Ce module nécessite le code complet de liste/ajout/modification des clients.")
+
+def module_gestion_produits():
+    st.header("📦 Gestion des Produits")
+    st.info("Ce module nécessite le code complet de gestion des produits/stocks.")
+    
 def module_placeholder(module_key, menu_label):
     if not has_access(module_key, "lecture"):
         st.error("❌ Accès refusé à ce module.")
@@ -512,9 +513,9 @@ if not st.session_state.logged_in:
 
     # --- Onglet Client ---
     with tab_client:
-        st.write("Entrez le nom de votre entreprise/contact tel qu'il est enregistré dans le système.")
+        st.write("Entrez le nom de votre entreprise/contact tel qu'il est enregistré dans le système (ex: Client Alpha).")
         with st.form("login_form_client"):
-            client_name = st.text_input("Nom du Client (ex: Client Alpha)", key="auth_client_name")
+            client_name = st.text_input("Nom du Client", key="auth_client_name")
             
             submitted_client = st.form_submit_button("🛒 Accéder à l'Espace Client")
             
@@ -535,7 +536,7 @@ else:
         st.caption(f"Rôle : **{st.session_state.role_name.upper()}**")
         st.divider()
 
-        # Options pour le personnel interne
+        # Options de navigation pour le personnel interne
         internal_menu_options = {
             "🏠 Tableau de Bord": "dashboard",
             "🔔 Notifications": "notifications",
@@ -549,17 +550,17 @@ else:
             "⚙️ Administration": "administration"
         }
         
-        # Options pour le mode client
+        # Options de navigation pour le client externe
         client_menu_options = {
             "🏠 Tableau de Bord": "dashboard",
-            "🛍️ Passer Commande": "espace_client",
+            "🛍️ Passer Commande": "espace_client", # <-- Cœur de la demande
             "🔔 Suivi Notifications": "notifications",
         }
         
-        # Sélection des options en fonction du mode de connexion
+        # Choix du menu
         if st.session_state.is_client:
             menu_options = client_menu_options
-            allowed_options = menu_options # Les clients voient tout de leur menu
+            allowed_options = menu_options
         else:
             menu_options = internal_menu_options
             allowed_options = {}
@@ -614,5 +615,3 @@ else:
     else:
         # Utilisation de la fonction placeholder pour les autres modules
         module_placeholder(current_module, menu)
-
-# --- Fin de l'application ---
