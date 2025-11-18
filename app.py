@@ -386,7 +386,8 @@ def page_passer_commande_publique():
         st.subheader("2. Votre Commande")
         
         produits_map = {f"{r['nom']} - {r['prix']:.2f} € (Stock: {r['stock']})": r['id'] for _, r in produits_disponibles.iterrows()}
-        selected_product_label = st.selectbox("Produit *", list(produits_map.keys()))
+        # NOTE: Ajout de 'key' pour éviter le conflit d'ID
+        selected_product_label = st.selectbox("Produit *", list(produits_map.keys()), key="client_order_product_select")
         
         quantite = 0
         produit_id = None
@@ -643,7 +644,7 @@ if has_access("rapports"): menu_items.append("Rapports & Exports")
 if has_access("utilisateurs"): menu_items.append("Gestion des Utilisateurs")
 menu_items.append("À Propos")
 
-menu = st.sidebar.selectbox("🧭 Navigation", menu_items)
+menu = st.sidebar.selectbox("🧭 Navigation", menu_items, key="main_menu_select")
 
 # ========== TABLEAU DE BORD ==========
 if menu == "Tableau de Bord":
@@ -711,8 +712,10 @@ elif menu == "Gestion des Clients":
                 st.subheader("🗑️ Supprimer un Client")
                 col1, col2 = st.columns([3, 1])
                 with col1:
+                    # FIX: Ajout de 'key' unique
                     client_id = st.selectbox("Sélectionner le client à supprimer", clients['id'].tolist(),
-                                            format_func=lambda x: f"{clients[clients['id']==x]['nom'].iloc[0]} - {clients[clients['id']==x]['email'].iloc[0]}")
+                                            format_func=lambda x: f"{clients[clients['id']==x]['nom'].iloc[0]} - {clients[clients['id']==x]['email'].iloc[0]}",
+                                            key='delete_client_id_selectbox')
                 with col2:
                     st.write("")
                     st.write("")
@@ -790,9 +793,11 @@ elif menu == "Gestion des Clients":
             if clients.empty:
                 st.info("📭 Aucun client à modifier")
             else:
+                # FIX: Ajout de 'key' unique
                 client_id_update = st.selectbox("Sélectionner le client à modifier", 
                                                clients['id'].tolist(),
-                                               format_func=lambda x: f"{clients[clients['id']==x]['nom'].iloc[0]}")
+                                               format_func=lambda x: f"{clients[clients['id']==x]['nom'].iloc[0]}",
+                                               key='update_client_id_selectbox')
                 
                 if client_id_update:
                     client_data = clients[clients['id'] == client_id_update].iloc[0]
@@ -857,8 +862,10 @@ elif menu == "Gestion des Produits":
                     st.subheader("📝 Ajuster le Stock")
                     col_a, col_b, col_c = st.columns(3)
                     with col_a:
+                        # FIX: Ajout de 'key' unique
                         prod_id = st.selectbox("Produit", produits['id'].tolist(),
-                                              format_func=lambda x: produits[produits['id']==x]['nom'].iloc[0])
+                                              format_func=lambda x: produits[produits['id']==x]['nom'].iloc[0],
+                                              key='adjust_produit_id_selectbox')
                     with col_b:
                         ajust = st.number_input("Ajustement", value=0, step=1, 
                                                help="Nombre positif pour ajouter, négatif pour retirer")
@@ -885,8 +892,10 @@ elif menu == "Gestion des Produits":
                     st.subheader("🗑️ Supprimer un Produit")
                     col_x, col_y = st.columns([3, 1])
                     with col_x:
+                        # FIX: Ajout de 'key' unique
                         prod_del_id = st.selectbox("Produit à supprimer", produits['id'].tolist(),
-                                                  format_func=lambda x: f"{produits[produits['id']==x]['nom'].iloc[0]}")
+                                                  format_func=lambda x: f"{produits[produits['id']==x]['nom'].iloc[0]}",
+                                                  key='delete_produit_id_selectbox')
                     with col_y:
                         st.write("")
                         st.write("")
@@ -975,9 +984,11 @@ elif menu == "Gestion des Produits":
             if produits.empty:
                 st.info("📭 Aucun produit à modifier")
             else:
+                # FIX: Ajout de 'key' unique
                 prod_id_update = st.selectbox("Sélectionner le produit à modifier", 
                                              produits['id'].tolist(),
-                                             format_func=lambda x: f"{produits[produits['id']==x]['nom'].iloc[0]}")
+                                             format_func=lambda x: f"{produits[produits['id']==x]['nom'].iloc[0]}",
+                                             key='update_produit_id_selectbox')
                 
                 if prod_id_update:
                     prod_data = produits[produits['id'] == prod_id_update].iloc[0]
@@ -1045,8 +1056,10 @@ elif menu == "Gestion des Fournisseurs":
                 st.subheader("🗑️ Supprimer un Fournisseur")
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    fournisseur_id = st.selectbox("Sélectionner le fournisseur", fournisseurs['id'].tolist(),
-                                            format_func=lambda x: f"{fournisseurs[fournisseurs['id']==x]['nom'].iloc[0]}")
+                    # FIX: Ajout de 'key' unique
+                    fournisseur_id = st.selectbox("Sélectionner le fournisseur à supprimer", fournisseurs['id'].tolist(),
+                                            format_func=lambda x: f"{fournisseurs[fournisseurs['id']==x]['nom'].iloc[0]}",
+                                            key='delete_fournisseur_id_selectbox')
                 with col2:
                     st.write("")
                     st.write("")
@@ -1125,9 +1138,11 @@ elif menu == "Gestion des Fournisseurs":
             if fournisseurs.empty:
                 st.info("📭 Aucun fournisseur à modifier")
             else:
+                # FIX: Ajout de 'key' unique (celui qui causait l'erreur)
                 fournisseur_id_update = st.selectbox("Sélectionner le fournisseur", 
                                                     fournisseurs['id'].tolist(),
-                                                    format_func=lambda x: f"{fournisseurs[fournisseurs['id']==x]['nom'].iloc[0]}")
+                                                    format_func=lambda x: f"{fournisseurs[fournisseurs['id']==x]['nom'].iloc[0]}",
+                                                    key='update_fournisseur_id_selectbox')
                 
                 if fournisseur_id_update:
                     fournisseur_data = fournisseurs[fournisseurs['id'] == fournisseur_id_update].iloc[0]
@@ -1194,8 +1209,10 @@ elif menu == "Gestion des Commandes":
                 st.subheader("🗑️ Supprimer une Commande")
                 col1, col2 = st.columns([3, 1])
                 with col1:
+                    # FIX: Ajout de 'key' unique
                     commande_id = st.selectbox("Sélectionner la commande à supprimer", commandes['id'].tolist(),
-                                            format_func=lambda x: f"Cmd #{x} - {commandes[commandes['id']==x]['client'].iloc[0]} ({commandes[commandes['id']==x]['statut'].iloc[0]})")
+                                            format_func=lambda x: f"Cmd #{x} - {commandes[commandes['id']==x]['client'].iloc[0]} ({commandes[commandes['id']==x]['statut'].iloc[0]})",
+                                            key='delete_commande_id_selectbox')
                 with col2:
                     st.write("")
                     st.write("")
@@ -1249,11 +1266,13 @@ elif menu == "Gestion des Commandes":
                 else:
                     with st.form("form_add_commande"):
                         client_map = {f"{r['nom']} ({r['email']})": r['id'] for _, r in clients.iterrows()}
-                        selected_client_label = st.selectbox("Client *", list(client_map.keys()))
+                        # FIX: Ajout de 'key' unique
+                        selected_client_label = st.selectbox("Client *", list(client_map.keys()), key="add_commande_client_select")
                         client_id = client_map[selected_client_label] if selected_client_label else None
 
                         produits_map = {f"{r['nom']} - {r['prix']:.2f} € (Stock: {r['stock']})": r['id'] for _, r in produits_disponibles.iterrows()}
-                        selected_product_label = st.selectbox("Produit *", list(produits_map.keys()))
+                        # FIX: Ajout de 'key' unique
+                        selected_product_label = st.selectbox("Produit *", list(produits_map.keys()), key="add_commande_product_select")
                         
                         quantite = 0
                         produit_id = None
@@ -1266,7 +1285,7 @@ elif menu == "Gestion des Commandes":
                             quantite = st.number_input("Quantité *", min_value=1, max_value=int(quantite_max), step=1, value=1)
                             st.info(f"Montant estimé: **{produit_data['prix'] * quantite:.2f} €**")
 
-                        statut = st.selectbox("Statut Initial", ['En attente', 'En cours', 'Livrée', 'Annulée'], index=0)
+                        statut = st.selectbox("Statut Initial", ['En attente', 'En cours', 'Livrée', 'Annulée'], index=0, key="add_commande_statut_select")
 
                         col1, col2 = st.columns(2)
                         with col1:
@@ -1314,21 +1333,24 @@ elif menu == "Gestion des Commandes":
             if commandes.empty:
                 st.info("📭 Aucune commande à gérer")
             else:
-                # Filtrer les commandes qui ne sont pas encore Livrées/Annulées pour simplifier la gestion
                 commandes_actives = commandes.copy()
                 
+                # FIX: Ajout de 'key' unique
                 commande_id_update = st.selectbox("Sélectionner la commande à modifier", 
                                                 commandes_actives['id'].tolist(),
-                                                format_func=lambda x: f"Cmd #{x} - {commandes_actives[commandes_actives['id']==x]['client'].iloc[0]} (Actuel: {commandes_actives[commandes_actives['id']==x]['statut'].iloc[0]})")
+                                                format_func=lambda x: f"Cmd #{x} - {commandes_actives[commandes_actives['id']==x]['client'].iloc[0]} (Actuel: {commandes_actives[commandes_actives['id']==x]['statut'].iloc[0]})",
+                                                key='update_commande_id_select')
                 
                 if commande_id_update:
                     cmd_data = commandes_actives[commandes_actives['id'] == commande_id_update].iloc[0]
                     current_statut = cmd_data['statut']
                     
                     with st.form("form_update_commande_statut"):
+                        # FIX: Ajout de 'key' unique
                         new_statut = st.selectbox("Nouveau Statut *", 
                                                   ['En attente', 'En cours', 'Livrée', 'Annulée'],
-                                                  index=['En attente', 'En cours', 'Livrée', 'Annulée'].index(current_statut))
+                                                  index=['En attente', 'En cours', 'Livrée', 'Annulée'].index(current_statut),
+                                                  key='update_commande_statut_select')
                         
                         submit_update = st.form_submit_button("✅ Mettre à Jour le Statut", use_container_width=True, type="primary")
                         
