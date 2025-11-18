@@ -14,7 +14,7 @@ load_dotenv()
 
 # Configuration de la page
 st.set_page_config(
-    page_title="SYGEP - Système de Gestion d'Entreprise Pédagogique (v3.4)",
+    page_title="SYGEP - Système de Gestion d'Entreprise Pédagogique (v3.5)",
     layout="wide",
     page_icon="🎓",
     initial_sidebar_state="expanded"
@@ -26,7 +26,7 @@ st.set_page_config(
 def init_connection_pool():
     """Initialise un pool de connexions PostgreSQL avec les secrets fournis."""
     try:
-        # ⚠️ REMPLACER PAR os.getenv() EN PRODUCTION POUR LA SÉCURITÉ
+        # ⚠️ SECRETS FOURNIS PAR L'UTILISATEUR (A CHANGER POUR os.getenv() EN PROD)
         connection_pool = psycopg2.pool.SimpleConnectionPool(
             1, 20,
             host="aws-1-eu-central-1.pooler.supabase.com",
@@ -83,7 +83,7 @@ def get_user_role_and_permissions(username, role_id):
         
         return user_role, permissions
     except Exception as e:
-        # st.error(f"Erreur de récupération des permissions: {e}")
+        # print(f"Erreur de récupération des permissions: {e}") # Debugging
         return None, {}
     finally:
         release_connection(conn)
@@ -94,13 +94,15 @@ def check_login(username, password):
     if not conn: return False
     try:
         hashed_pwd = hash_password(password)
+        # 🚨 Requête qui nécessite la colonne nom_complet dans la table utilisateurs 🚨
         query = "SELECT id, nom_complet, role_id FROM utilisateurs WHERE email = %s AND mot_de_passe = %s"
         user_data = pd.read_sql_query(query, conn, params=(username, hashed_pwd))
         
         if not user_data.empty:
             user_id = user_data.iloc[0]['id']
             role_id = user_data.iloc[0]['role_id']
-            user_full_name = user_data.iloc[0]['nom_complet']
+            # C'est ici que 'nom_complet' est lu. Si la colonne est absente, l'erreur SQL est levée.
+            user_full_name = user_data.iloc[0]['nom_complet'] 
             
             user_role, user_permissions = get_user_role_and_permissions(username, role_id)
             
@@ -207,13 +209,14 @@ def mark_notification_as_read(notification_id):
     finally:
         release_connection(conn)
 
-# ========== FONCTIONS DE RÉCUPÉRATION DE DONNÉES (SIMPLIFIÉES) ==========
+# ========== FONCTIONS DE RÉCUPÉRATION DE DONNÉES ==========
 
 @st.cache_data(ttl=30)
 def get_clients():
     conn = get_connection()
     if not conn: return pd.DataFrame()
     try:
+        # Assurez-vous que cette table existe !
         df = pd.read_sql_query("SELECT id, nom, email, telephone, ville, pays FROM clients", conn)
         return df
     finally:
@@ -224,6 +227,7 @@ def get_fournisseurs():
     conn = get_connection()
     if not conn: return pd.DataFrame()
     try:
+        # Assurez-vous que cette table existe !
         df = pd.read_sql_query("SELECT id, nom, contact, email FROM fournisseurs", conn)
         return df
     finally:
@@ -234,6 +238,7 @@ def get_produits():
     conn = get_connection()
     if not conn: return pd.DataFrame()
     try:
+        # Assurez-vous que cette table existe !
         df = pd.read_sql_query("SELECT id, nom, reference, stock, prix_vente FROM produits", conn)
         return df
     finally:
@@ -243,7 +248,7 @@ def get_produits():
 
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
-    st.session_state.permissions = {} # Initialiser les permissions
+    st.session_state.permissions = {}
 
 if not st.session_state.logged_in:
     # Page de Connexion
@@ -267,11 +272,9 @@ if not st.session_state.logged_in:
     
     with col2:
         st.info("""
-            **Rôles de Test :** Assurez-vous que ces utilisateurs/rôles existent dans votre base de données.
+            **Rôles de Test (Exemples) :** Assurez-vous que ces utilisateurs sont bien insérés dans la DB avec la colonne `nom_complet`.
             * **Admin :** admin@sygep.ma / 123456
             * **Commercial :** commercial@sygep.ma / 123456
-            * **Gestionnaire Stock :** stock@sygep.ma / 123456
-            * **Comptable :** compta@sygep.ma / 123456
         """)
     
     st.stop()
@@ -281,8 +284,8 @@ if not st.session_state.logged_in:
 st.sidebar.markdown("# SYGEP") 
 
 # Informations utilisateur
-# FIX: Utilisation de .get() pour éviter l'AttributeError si la session est réinitialisée ou mal initialisée
-st.sidebar.markdown(f"**Utilisateur :** {st.session_state.get('user_full_name', 'Non connecté')}")
+# CORRECTION D'ERREUR: Utilisation de .get() pour éviter l'AttributeError 
+st.sidebar.markdown(f"**Utilisateur :** {st.session_state.get('user_full_name', 'Chargement...')}")
 st.sidebar.markdown(f"**Rôle :** {st.session_state.get('user_role', 'N/A').upper()}")
 st.sidebar.markdown("---")
 
@@ -306,7 +309,6 @@ if has_access("fournisseurs"): menu_items.append("🚚 Gestion Fournisseurs")
 if has_access("produits"): menu_items.append("📦 Gestion Produits & Stock")
 if has_access("workflow_client"): menu_items.append("📋 Workflow Commandes Clients")
 if has_access("workflow_fournisseur"): menu_items.append("🏭 Workflow Achats Fournisseurs")
-# NOUVEAU: Module Facturation & Comptabilité
 if has_access("comptabilite"): menu_items.append("💰 Facturation & Comptabilité")
 if has_access("administration"): menu_items.append("⚙️ Administration & Logs")
 
@@ -326,29 +328,33 @@ if st.sidebar.button("Déconnexion 🚪"):
 
 # ==================== CONTENU PRINCIPAL DE L'APPLICATION ====================
 
-# Modules de base (omission du contenu pour concision, mais les blocs doivent exister)
 if menu == "👥 Gestion Clients":
+    if not has_access("clients"): st.error("❌ Accès refusé"); st.stop()
     st.header("👥 Gestion Clients")
     st.dataframe(get_clients(), use_container_width=True)
 elif menu == "🚚 Gestion Fournisseurs":
+    if not has_access("fournisseurs"): st.error("❌ Accès refusé"); st.stop()
     st.header("🚚 Gestion Fournisseurs")
     st.dataframe(get_fournisseurs(), use_container_width=True)
 elif menu == "📦 Gestion Produits & Stock":
+    if not has_access("produits"): st.error("❌ Accès refusé"); st.stop()
     st.header("📦 Gestion Produits & Stock")
     st.dataframe(get_produits(), use_container_width=True)
 elif menu == "⚙️ Administration & Logs":
+    if not has_access("administration"): st.error("❌ Accès refusé"); st.stop()
     st.header("⚙️ Administration & Logs")
     st.info("Logique d'administration ici.")
 
 
 # ---------------------------------------------------------------------
 
-# ========== WORKFLOW COMMANDES CLIENTS (Notification Créateur Ajoutée) ==========
+# ========== WORKFLOW COMMANDES CLIENTS ==========
 elif menu == "📋 Workflow Commandes Clients":
     if not has_access("workflow_client"):
         st.error("❌ Accès refusé")
         st.stop()
     
+    log_access(st.session_state.user_id, "workflow_client", "Consultation")
     st.header("📋 Workflow Commandes Clients")
     
     tab1, tab2, tab3 = st.tabs(["➕ Création", "📦 À Préparer", "🚚 À Expédier"])
@@ -359,6 +365,10 @@ elif menu == "📋 Workflow Commandes Clients":
             
             with st.form("form_commande_client"):
                 clients = get_clients()
+                if clients.empty:
+                    st.warning("Aucun client trouvé. Veuillez ajouter un client avant de créer une commande.")
+                    st.stop()
+                    
                 client_id = st.selectbox("Client", clients['id'].tolist(), format_func=lambda x: clients[clients['id']==x]['nom'].iloc[0], key="sel_client")
                 numero_commande = st.text_input("N° de Commande", value=f"CMD-{datetime.now().strftime('%Y%m%d%H%M')}")
                 montant_total = st.number_input("Montant Total TTC (Simulé)", min_value=1.0, step=10.0)
@@ -382,7 +392,7 @@ elif menu == "📋 Workflow Commandes Clients":
                                            f"Une nouvelle commande client N°{numero_commande} a été créée. Vérifiez le stock.", 
                                            commande_id, "commande")
                         
-                        # 2. Notification au Commercial/Créateur (Client Externe)
+                        # 2. Notification au Commercial/Créateur
                         creer_notification(st.session_state.user_id, "Commande Créée", 
                                            f"Votre commande N°{numero_commande} a été créée et est en attente de vérification de stock.", 
                                            commande_id, "commande")
@@ -399,14 +409,19 @@ elif menu == "📋 Workflow Commandes Clients":
     with tab3: # À Expédier (L'expédition notifie la Comptabilité pour facturation)
         st.subheader("🚚 Commandes Prêtes à Être Expédiées")
         conn = get_connection()
-        commandes_a_expedier = pd.read_sql_query("""
-            SELECT cw.*, c.nom as client_nom
-            FROM commandes_workflow cw
-            JOIN clients c ON cw.client_id = c.id
-            WHERE cw.statut = 'preparer'
-            ORDER BY cw.date_creation ASC
-        """, conn)
-        release_connection(conn)
+        try:
+            commandes_a_expedier = pd.read_sql_query("""
+                SELECT cw.*, c.nom as client_nom
+                FROM commandes_workflow cw
+                JOIN clients c ON cw.client_id = c.id
+                WHERE cw.statut = 'preparer'
+                ORDER BY cw.date_creation ASC
+            """, conn)
+        except Exception as e:
+            st.error(f"Erreur de lecture de commandes: {e}")
+            commandes_a_expedier = pd.DataFrame()
+        finally:
+            release_connection(conn)
         
         if not commandes_a_expedier.empty:
             for _, cmd in commandes_a_expedier.iterrows():
@@ -447,6 +462,7 @@ elif menu == "🏭 Workflow Achats Fournisseurs":
         st.error("❌ Accès refusé")
         st.stop()
     
+    log_access(st.session_state.user_id, "workflow_fournisseur", "Consultation")
     st.header("🏭 Workflow Achats Fournisseurs")
     
     tabs_base = ["➕ Création"]
@@ -457,7 +473,7 @@ elif menu == "🏭 Workflow Achats Fournisseurs":
     
     selected_tab = st.tabs(tabs_base)
     
-    # ... (Ajoutez le contenu du TAB "➕ Création" ici) ...
+    # ... (Création : non détaillée ici pour concision) ...
     
     # ==================== TAB : À VALIDER (Validation Commande Achat) ====================
     if "✅ À Valider" in tabs_base and has_access("workflow_fournisseur", "ecriture"):
@@ -465,14 +481,19 @@ elif menu == "🏭 Workflow Achats Fournisseurs":
         with selected_tab[tab_index]:
             st.subheader("✅ Bons de Commande Fournisseur à Valider")
             conn = get_connection()
-            achats_a_valider = pd.read_sql_query("""
-                SELECT aw.id, aw.numero, f.nom as fournisseur_nom, aw.montant_total, aw.date_creation, aw.createur_id
-                FROM achats_workflow aw
-                JOIN fournisseurs f ON aw.fournisseur_id = f.id
-                WHERE aw.statut = 'nouveau'
-                ORDER BY aw.date_creation ASC
-            """, conn)
-            release_connection(conn)
+            try:
+                achats_a_valider = pd.read_sql_query("""
+                    SELECT aw.id, aw.numero, f.nom as fournisseur_nom, aw.montant_total, aw.date_creation, aw.createur_id
+                    FROM achats_workflow aw
+                    JOIN fournisseurs f ON aw.fournisseur_id = f.id
+                    WHERE aw.statut = 'nouveau'
+                    ORDER BY aw.date_creation ASC
+                """, conn)
+            except Exception as e:
+                st.error(f"Erreur de lecture d'achats: {e}")
+                achats_a_valider = pd.DataFrame()
+            finally:
+                release_connection(conn)
             
             if not achats_a_valider.empty:
                 st.info(f"📋 **{len(achats_a_valider)}** bon(s) de commande en attente de validation")
@@ -484,7 +505,6 @@ elif menu == "🏭 Workflow Achats Fournisseurs":
                                 conn = get_connection()
                                 try:
                                     c = conn.cursor()
-                                    # Mise à jour statut: 'nouveau' -> 'commande' (validation commande achat)
                                     c.execute("UPDATE achats_workflow SET statut = 'commande', date_validation = NOW() WHERE id = %s", (achat['id'],))
                                     
                                     # Notification pour la Réception (pour le Gestionnaire de Stock)
@@ -509,20 +529,31 @@ elif menu == "🏭 Workflow Achats Fournisseurs":
         with selected_tab[tab_index]:
             st.subheader("📥 Livraisons Fournisseur à Réceptionner")
             conn = get_connection()
-            achats_a_receptionner = pd.read_sql_query("""
-                SELECT aw.*, f.nom as fournisseur_nom
-                FROM achats_workflow aw
-                JOIN fournisseurs f ON aw.fournisseur_id = f.id
-                WHERE aw.statut = 'commande' 
-                ORDER BY aw.date_creation ASC
-            """, conn)
-            release_connection(conn)
+            try:
+                achats_a_receptionner = pd.read_sql_query("""
+                    SELECT aw.*, f.nom as fournisseur_nom
+                    FROM achats_workflow aw
+                    JOIN fournisseurs f ON aw.fournisseur_id = f.id
+                    WHERE aw.statut = 'commande' 
+                    ORDER BY aw.date_creation ASC
+                """, conn)
+            except Exception as e:
+                st.error(f"Erreur de lecture d'achats: {e}")
+                achats_a_receptionner = pd.DataFrame()
+            finally:
+                release_connection(conn)
 
             if not achats_a_receptionner.empty:
                 st.info(f"🚚 **{len(achats_a_receptionner)}** livraison(s) à réceptionner")
                 for _, achat in achats_a_receptionner.iterrows():
                     with st.expander(f"📦 Achat N°{achat['numero']} - {achat['fournisseur_nom']}", expanded=False):
-                        # ... Simuler la lecture des lignes d'achat ...
+                        
+                        # --- Simuler des lignes d'achat (à remplacer par la vraie lecture de DB) ---
+                        lignes_simulees = pd.DataFrame([{'produit_nom': 'Article X', 'quantite': 10, 'produit_id': 1}])
+                        st.info("Détails des produits à réceptionner (Simulé):")
+                        st.dataframe(lignes_simulees[['produit_nom', 'quantite']], hide_index=True)
+                        st.divider()
+                        # --------------------------------------------------------------------------
                         
                         with st.form(f"form_reception_{achat['id']}"):
                             st.info("💡 **Validation de Réception :** Confirmez la réception complète et l'entrée en stock.")
@@ -539,8 +570,9 @@ elif menu == "🏭 Workflow Achats Fournisseurs":
                                         c.execute("UPDATE achats_workflow SET statut = 'recu', date_reception = %s, bl_fournisseur = %s WHERE id = %s", 
                                                   (date_reception, bl_numero, achat['id']))
                                         
-                                        # 2. Mise à jour du stock (simulée: vous devez adapter votre boucle 'lignes_achat')
-                                        # c.execute("UPDATE produits SET stock = stock + %s WHERE id = %s", (quantite, produit_id))
+                                        # 2. Mise à jour du stock (Logique simulée, à adapter avec vos lignes_achat réelles)
+                                        for _, ligne in lignes_simulees.iterrows():
+                                            c.execute("UPDATE produits SET stock = stock + %s WHERE id = %s", (ligne['quantite'], ligne['produit_id']))
                                             
                                         # 3. Notification pour la Comptabilité (Paiement)
                                         c.execute("SELECT id FROM utilisateurs WHERE role_id IN (SELECT id FROM roles WHERE nom IN ('comptable', 'admin'))")
@@ -562,32 +594,38 @@ elif menu == "🏭 Workflow Achats Fournisseurs":
             else:
                 st.info("Aucune livraison fournisseur à réceptionner.")
     
-    # ... (Ajoutez le contenu du TAB "📊 Tous les Achats" ici) ...
+    # ... (TAB : Tous les Achats - non détaillé ici pour concision) ...
 
 # ---------------------------------------------------------------------
 
-# ========== FACTURATION & COMPTABILITÉ (Module de Paiement/Facturation) ==========
+# ========== FACTURATION & COMPTABILITÉ ==========
 elif menu == "💰 Facturation & Comptabilité":
     if not has_access("comptabilite"): 
         st.error("❌ Accès refusé")
         st.stop()
     
+    log_access(st.session_state.user_id, "comptabilite", "Consultation")
     st.header("💰 Facturation & Comptabilité")
     
     tab1, tab2 = st.tabs(["📝 Commandes à Facturer", "💸 Paiements Fournisseurs"])
     
-    # ===== TAB 1 : COMMANDES À FACTURER (Validation de la facturation client) =====
+    # ===== TAB 1 : COMMANDES À FACTURER =====
     with tab1:
         st.subheader("📝 Commandes Clients Expédiées (Facturation Requise)")
         conn = get_connection()
-        commandes_a_facturer = pd.read_sql_query("""
-            SELECT cw.id, cw.numero, c.nom as client_nom, cw.montant_total, cw.date_expedition
-            FROM commandes_workflow cw
-            JOIN clients c ON cw.client_id = c.id
-            WHERE cw.statut = 'expedie'
-            ORDER BY cw.date_expedition ASC
-        """, conn)
-        release_connection(conn)
+        try:
+            commandes_a_facturer = pd.read_sql_query("""
+                SELECT cw.id, cw.numero, c.nom as client_nom, cw.montant_total, cw.date_expedition
+                FROM commandes_workflow cw
+                JOIN clients c ON cw.client_id = c.id
+                WHERE cw.statut = 'expedie'
+                ORDER BY cw.date_expedition ASC
+            """, conn)
+        except Exception as e:
+            st.error(f"Erreur de lecture de commandes: {e}")
+            commandes_a_facturer = pd.DataFrame()
+        finally:
+            release_connection(conn)
         
         if not commandes_a_facturer.empty:
             st.info(f"🧾 **{len(commandes_a_facturer)}** commande(s) à facturer")
@@ -597,7 +635,6 @@ elif menu == "💰 Facturation & Comptabilité":
                         conn = get_connection()
                         try:
                             c = conn.cursor()
-                            # Mise à jour statut: 'expedie' -> 'facturee'
                             c.execute("UPDATE commandes_workflow SET statut = 'facturee', date_facturation = NOW() WHERE id = %s", (cmd['id'],))
                             conn.commit()
                             st.success(f"✅ Facture générée pour la commande N°{cmd['numero']}. Statut mis à jour à 'facturée'.")
@@ -614,14 +651,19 @@ elif menu == "💰 Facturation & Comptabilité":
     with tab2:
         st.subheader("💸 Achats Fournisseurs à Payer")
         conn = get_connection()
-        achats_a_payer = pd.read_sql_query("""
-            SELECT aw.id, aw.numero, f.nom as fournisseur_nom, aw.montant_total, aw.date_reception
-            FROM achats_workflow aw
-            JOIN fournisseurs f ON aw.fournisseur_id = f.id
-            WHERE aw.statut = 'recu' 
-            ORDER BY aw.date_reception ASC
-        """, conn)
-        release_connection(conn)
+        try:
+            achats_a_payer = pd.read_sql_query("""
+                SELECT aw.id, aw.numero, f.nom as fournisseur_nom, aw.montant_total, aw.date_reception
+                FROM achats_workflow aw
+                JOIN fournisseurs f ON aw.fournisseur_id = f.id
+                WHERE aw.statut = 'recu' 
+                ORDER BY aw.date_reception ASC
+            """, conn)
+        except Exception as e:
+            st.error(f"Erreur de lecture d'achats: {e}")
+            achats_a_payer = pd.DataFrame()
+        finally:
+            release_connection(conn)
         
         if not achats_a_payer.empty:
             st.info(f"💵 **{len(achats_a_payer)}** achat(s) fournisseur à payer")
@@ -631,7 +673,6 @@ elif menu == "💰 Facturation & Comptabilité":
                         conn = get_connection()
                         try:
                             c = conn.cursor()
-                            # Mise à jour statut: 'recu' -> 'paye'
                             c.execute("UPDATE achats_workflow SET statut = 'paye', date_paiement = NOW() WHERE id = %s", (achat['id'],))
                             conn.commit()
                             st.success(f"✅ Paiement de l'achat N°{achat['numero']} confirmé. Statut mis à jour à 'payé'.")
