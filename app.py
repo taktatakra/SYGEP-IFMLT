@@ -719,15 +719,25 @@ elif menu == "Gestion des Clients":
                         conn = get_connection()
                         try:
                             c = conn.cursor()
-                            c.execute("DELETE FROM clients WHERE id=%s", (int(client_id),))
-                            conn.commit()
-                            log_access(st.session_state.user_id, "clients", f"Suppression ID:{client_id}")
-                            st.success("✅ Client supprimé avec succès!")
-                            get_clients.clear()
-                            st.rerun()
+                            
+                            # Vérifier si le client a des commandes
+                            c.execute("SELECT COUNT(*) FROM commandes WHERE client_id=%s", (int(client_id),))
+                            nb_commandes = c.fetchone()[0]
+                            
+                            if nb_commandes > 0:
+                                st.error(f"❌ Impossible de supprimer ce client !\n\n"
+                                        f"Il possède {nb_commandes} commande(s) enregistrée(s).\n\n"
+                                        f"💡 Supprimez d'abord ses commandes ou archivez le client.")
+                            else:
+                                c.execute("DELETE FROM clients WHERE id=%s", (int(client_id),))
+                                conn.commit()
+                                log_access(st.session_state.user_id, "clients", f"Suppression ID:{client_id}")
+                                st.success("✅ Client supprimé avec succès!")
+                                get_clients.clear()
+                                st.rerun()
                         except Exception as e:
                             conn.rollback()
-                            st.error(f"❌ Erreur: {e}")
+                            st.error(f"❌ Erreur technique: {e}")
                         finally:
                             release_connection(conn)
         else:
@@ -883,15 +893,30 @@ elif menu == "Gestion des Produits":
                             conn = get_connection()
                             try:
                                 c = conn.cursor()
-                                c.execute("DELETE FROM produits WHERE id=%s", (int(prod_del_id),))
-                                conn.commit()
-                                log_access(st.session_state.user_id, "produits", f"Suppression ID:{prod_del_id}")
-                                st.success("✅ Produit supprimé!")
-                                get_produits.clear()
-                                st.rerun()
+                                
+                                # Vérifier si le produit est utilisé dans des commandes ou achats
+                                c.execute("SELECT COUNT(*) FROM commandes WHERE produit_id=%s", (int(prod_del_id),))
+                                nb_commandes = c.fetchone()[0]
+                                
+                                c.execute("SELECT COUNT(*) FROM achats WHERE produit_id=%s", (int(prod_del_id),))
+                                nb_achats = c.fetchone()[0]
+                                
+                                if nb_commandes > 0 or nb_achats > 0:
+                                    st.error(f"❌ Impossible de supprimer ce produit !\n\n"
+                                            f"Il est référencé dans :\n"
+                                            f"- {nb_commandes} commande(s)\n"
+                                            f"- {nb_achats} achat(s)\n\n"
+                                            f"💡 Supprimez d'abord ces enregistrements ou archivez le produit.")
+                                else:
+                                    c.execute("DELETE FROM produits WHERE id=%s", (int(prod_del_id),))
+                                    conn.commit()
+                                    log_access(st.session_state.user_id, "produits", f"Suppression ID:{prod_del_id}")
+                                    st.success("✅ Produit supprimé!")
+                                    get_produits.clear()
+                                    st.rerun()
                             except Exception as e:
                                 conn.rollback()
-                                st.error(f"❌ Erreur: {e}")
+                                st.error(f"❌ Erreur technique: {e}")
                             finally:
                                 release_connection(conn)
         else:
@@ -1028,15 +1053,25 @@ elif menu == "Gestion des Fournisseurs":
                         conn = get_connection()
                         try:
                             c = conn.cursor()
-                            c.execute("DELETE FROM fournisseurs WHERE id=%s", (int(fournisseur_id),)) 
-                            conn.commit()
-                            log_access(st.session_state.user_id, "fournisseurs", f"Suppression ID:{fournisseur_id}")
-                            st.success("✅ Fournisseur supprimé!")
-                            get_fournisseurs.clear()
-                            st.rerun()
+                            
+                            # Vérifier si le fournisseur a des achats
+                            c.execute("SELECT COUNT(*) FROM achats WHERE fournisseur_id=%s", (int(fournisseur_id),))
+                            nb_achats = c.fetchone()[0]
+                            
+                            if nb_achats > 0:
+                                st.error(f"❌ Impossible de supprimer ce fournisseur !\n\n"
+                                        f"Il possède {nb_achats} achat(s) enregistré(s).\n\n"
+                                        f"💡 Supprimez d'abord ses achats ou archivez le fournisseur.")
+                            else:
+                                c.execute("DELETE FROM fournisseurs WHERE id=%s", (int(fournisseur_id),)) 
+                                conn.commit()
+                                log_access(st.session_state.user_id, "fournisseurs", f"Suppression ID:{fournisseur_id}")
+                                st.success("✅ Fournisseur supprimé!")
+                                get_fournisseurs.clear()
+                                st.rerun()
                         except Exception as e:
                             conn.rollback()
-                            st.error(f"❌ Erreur: {e}")
+                            st.error(f"❌ Erreur technique: {e}")
                         finally:
                             release_connection(conn)
         else:
