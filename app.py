@@ -12,7 +12,7 @@ load_dotenv()
 
 # Configuration de la page
 st.set_page_config(
-    page_title="SYGEP - Système de Gestion d'Entreprise Pédagogique (v7.0 Adapté)",
+    page_title="SYGEP - Système de Gestion d'Entreprise Pédagogique (v7.2 ADAPTÉ)",
     layout="wide",
     page_icon="🎓",
     initial_sidebar_state="expanded"
@@ -56,27 +56,29 @@ def get_connection():
         st.error(f"Erreur lors de la récupération de la connexion : {e}")
         st.stop()
 
-# ========== 2. FONCTIONS UTILITAIRES ET SÉCURITÉ ==========
+# ========== 2. FONCTIONS UTILITAIRES ET SÉCURITÉ (ADAPTÉES À VOTRE SCHÉMA) ==========
 
 def hash_password(password):
     """Hache un mot de passe en utilisant SHA256."""
     return hashlib.sha256(password.encode()).hexdigest()
 
 def log_access(entity_id, entity_type, module, action):
-    """Enregistre l'action de l'utilisateur/client dans la table logs_access (uniquement pour les utilisateurs UUID)."""
-    # L'ID de l'entité doit exister et la table logs_access doit être créée.
+    """
+    Enregistre l'action de l'utilisateur/client dans la table logs_access.
+    (L'exécution est silencieuse en cas d'erreur si la table 'logs_access' n'existe pas)
+    """
     if entity_type == 'user' and 'user_id' in st.session_state:
         conn = get_connection()
         try:
             c = conn.cursor()
-            # Assurez-vous que la table logs_access existe dans votre DB
+            # Utilise 'user_id' qui est de type UUID dans la table 'logs_access'
             c.execute("""
                 INSERT INTO logs_access (user_id, module, action) 
                 VALUES (%s, %s, %s)
             """, (entity_id, module, action))
             conn.commit()
         except Exception:
-            # Silent failure for logging errors
+            # Échec silencieux pour l'enregistrement des logs
             pass
         finally:
             st.session_state.conn_pool.putconn(conn)
@@ -86,12 +88,13 @@ def get_user_role_and_name(username, password_hash):
     """
     Vérifie les identifiants de l'utilisateur interne.
     ADAPTÉ pour utiliser les colonnes 'username' et 'password' et récupérer le rôle string.
+    (L'exécution échouera si la table 'utilisateurs' ou les colonnes sont manquantes)
     """
     conn = get_connection()
     try:
         c = conn.cursor()
         c.execute("""
-            SELECT id, username, role
+            SELECT id, nom_complet, role
             FROM utilisateurs
             WHERE username = %s AND password = %s
         """, (username, password_hash))
@@ -100,9 +103,8 @@ def get_user_role_and_name(username, password_hash):
         
         if user_data:
             user_id = str(user_data[0]) 
-            # On utilise le username comme nom d'affichage par défaut
             nom_complet = user_data[1] 
-            role_name = user_data[2] # Le rôle est un string (ex: 'vendeur')
+            role_name = user_data[2]
             return user_id, nom_complet, role_name
         return None, None, None
     finally:
@@ -113,6 +115,7 @@ def has_access(module, access_type="lecture"):
     """
     Vérifie les permissions de l'utilisateur. 
     ADAPTÉ pour utiliser l'ID de l'utilisateur (user_id) au lieu du role_id (UBAC).
+    (L'exécution échouera si la table 'permissions' est manquante)
     """
     if st.session_state.get('is_client'):
         return module in ["espace_client", "notifications", "dashboard"] 
@@ -130,7 +133,7 @@ def has_access(module, access_type="lecture"):
         c = conn.cursor()
         access_column = "acces_lecture" if access_type == "lecture" else "acces_ecriture"
 
-        # On utilise user_id pour vérifier les permissions
+        # On utilise user_id pour vérifier les permissions dans la table 'permissions'
         c.execute(f"""
             SELECT {access_column}
             FROM permissions
@@ -142,19 +145,22 @@ def has_access(module, access_type="lecture"):
         if permission and permission[0] is True:
             return True
         return False
+    except Exception:
+        # En cas d'erreur (si la table permissions n'existe pas), bloquer l'accès pour des raisons de sécurité.
+        return False
     finally:
         st.session_state.conn_pool.putconn(conn)
 
 
-# ========== 3. FONCTIONS D'AUTHENTIFICATION ET DE DÉCONNEXION ==========
+# ========== 3. FONCTIONS D'AUTHENTIFICATION ET DE DÉCONNEXION (Inchagées) ==========
 
 def authenticate_internal():
-    """Authentification pour le personnel (avec username/email)."""
+    """Authentification pour le personnel (avec username/password)."""
     username = st.session_state.auth_username
     password = st.session_state.auth_password
     
     hashed_password = hash_password(password)
-    # MODIFIÉ: role_id supprimé
+    
     user_id, nom_complet, role_name = get_user_role_and_name(username, hashed_password)
     
     if user_id:
@@ -163,7 +169,6 @@ def authenticate_internal():
         st.session_state.user_id = user_id
         st.session_state.user_name = nom_complet
         st.session_state.role_name = role_name
-        # st.session_state.role_id est supprimé
         log_access(user_id, "user", "Authentification", "Connexion réussie")
         st.rerun()
     else:
@@ -171,12 +176,14 @@ def authenticate_internal():
 
 
 def authenticate_client():
-    """Authentification pour le client (sans mot de passe)."""
+    """Authentification pour le client (avec nom du client)."""
     client_name = st.session_state.auth_client_name
     
     conn = get_connection()
     try:
         c = conn.cursor()
+        # Assurez-vous que la table 'clients' existe bien
+        # Hypothèse: la table clients a au moins 'id' et 'nom'
         c.execute("SELECT id, nom FROM clients WHERE nom ILIKE %s", (client_name.strip(),))
         client_data = c.fetchone()
         
@@ -184,17 +191,16 @@ def authenticate_client():
             client_id = client_data[0]
             client_name_db = client_data[1]
             
-            # Le rôle client est un rôle par défaut, le role_id n'est plus pertinent
-            
             st.session_state.logged_in = True
             st.session_state.is_client = True 
             st.session_state.client_id = client_id
             st.session_state.user_name = client_name_db
             st.session_state.role_name = 'client'
-            # st.session_state.role_id est supprimé
             st.rerun()
         else:
             st.session_state.login_error_client = "Nom de client non trouvé."
+    except Exception as e:
+        st.error(f"Erreur d'accès à la table 'clients' : {e}")
     finally:
         st.session_state.conn_pool.putconn(conn)
 
@@ -207,25 +213,26 @@ def logout():
 
 
 # ========== 4. FONCTIONS DE GESTION DE DONNÉES (CRUD) ==========
-# Les fonctions CRUD suivantes ne dépendent pas des tables 'utilisateurs'/'roles' et restent inchangées.
-# Elles supposent que les tables 'clients', 'produits' et 'fournisseurs' existent avec les colonnes correspondantes.
 
 # --- CRUD Clients ---
 @st.cache_data(ttl=60)
 def get_clients():
     conn = get_connection()
     try:
-        clients_df = pd.read_sql_query("SELECT id, nom, email, telephone, ville, pays FROM clients ORDER BY nom", conn)
+        # Hypothèse la plus simple pour Clients
+        clients_df = pd.read_sql_query("SELECT id, nom FROM clients ORDER BY nom", conn) 
         return clients_df
+    except Exception as e:
+        st.error(f"Erreur lors de la lecture de la table 'clients'. Vérifiez que les colonnes 'id' et 'nom' existent : {e}")
+        return pd.DataFrame({'id':[], 'nom':[]})
     finally:
         st.session_state.conn_pool.putconn(conn)
 
-def insert_client(nom, email, telephone, ville, pays):
+def insert_client(nom):
     conn = get_connection()
     try:
         c = conn.cursor()
-        c.execute("""INSERT INTO clients (nom, email, telephone, ville, pays) VALUES (%s, %s, %s, %s, %s)""", 
-                  (nom, email, telephone, ville, pays))
+        c.execute("""INSERT INTO clients (nom) VALUES (%s)""", (nom,)) # Simplifié
         conn.commit()
         get_clients.clear()
         return True
@@ -236,12 +243,11 @@ def insert_client(nom, email, telephone, ville, pays):
     finally:
         st.session_state.conn_pool.putconn(conn)
         
-def update_client(client_id, nom, email, telephone, ville, pays):
+def update_client(client_id, nom):
     conn = get_connection()
     try:
         c = conn.cursor()
-        c.execute("""UPDATE clients SET nom=%s, email=%s, telephone=%s, ville=%s, pays=%s WHERE id=%s""", 
-                  (nom, email, telephone, ville, pays, client_id))
+        c.execute("""UPDATE clients SET nom=%s WHERE id=%s""", (nom, client_id)) # Simplifié
         conn.commit()
         get_clients.clear()
         return True
@@ -262,27 +268,31 @@ def delete_client(client_id):
         return True
     except Exception as e:
         conn.rollback()
-        st.error(f"Erreur lors de la suppression du client : {e}. (Vérifiez les commandes liées.)")
+        st.error(f"Erreur lors de la suppression du client : {e}.")
         return False
     finally:
         st.session_state.conn_pool.putconn(conn)
 
-# --- CRUD Produits ---
+# --- CRUD Produits (SIMPLIFIÉ) ---
 @st.cache_data(ttl=60)
 def get_products():
     conn = get_connection()
     try:
-        produits_df = pd.read_sql_query("SELECT id, nom, reference, stock, prix_vente FROM produits ORDER BY nom", conn)
+        # ** MODIFIÉ ** : Sélectionne uniquement les colonnes minimales 'id' et 'nom'
+        produits_df = pd.read_sql_query("SELECT id, nom FROM produits ORDER BY nom", conn)
         return produits_df
+    except Exception as e:
+        st.error(f"Erreur lors de la lecture de la table 'produits'. Vérifiez que la table 'produits' avec les colonnes 'id' et 'nom' existe : {e}")
+        return pd.DataFrame({'id':[], 'nom':[]})
     finally:
         st.session_state.conn_pool.putconn(conn)
         
-def insert_product(nom, reference, stock, prix_vente):
+def insert_product(nom):
     conn = get_connection()
     try:
         c = conn.cursor()
-        c.execute("""INSERT INTO produits (nom, reference, stock, prix_vente) VALUES (%s, %s, %s, %s)""", 
-                  (nom, reference, stock, prix_vente))
+        # ** MODIFIÉ ** : Insertion de 'nom' uniquement
+        c.execute("""INSERT INTO produits (nom) VALUES (%s)""", (nom,)) 
         conn.commit()
         get_products.clear()
         return True
@@ -293,12 +303,12 @@ def insert_product(nom, reference, stock, prix_vente):
     finally:
         st.session_state.conn_pool.putconn(conn)
 
-def update_product(product_id, nom, reference, stock, prix_vente):
+def update_product(product_id, nom):
     conn = get_connection()
     try:
         c = conn.cursor()
-        c.execute("""UPDATE produits SET nom=%s, reference=%s, stock=%s, prix_vente=%s WHERE id=%s""", 
-                  (nom, reference, stock, prix_vente, product_id))
+        # ** MODIFIÉ ** : Mise à jour de 'nom' uniquement
+        c.execute("""UPDATE produits SET nom=%s WHERE id=%s""", (nom, product_id))
         conn.commit()
         get_products.clear()
         return True
@@ -319,7 +329,7 @@ def delete_product(product_id):
         return True
     except Exception as e:
         conn.rollback()
-        st.error(f"Erreur lors de la suppression du produit : {e}. (Vérifiez les commandes liées.)")
+        st.error(f"Erreur lors de la suppression du produit : {e}.")
         return False
     finally:
         st.session_state.conn_pool.putconn(conn)
@@ -329,17 +339,20 @@ def delete_product(product_id):
 def get_fournisseurs():
     conn = get_connection()
     try:
-        fournisseurs_df = pd.read_sql_query("SELECT id, nom, contact, email FROM fournisseurs ORDER BY nom", conn)
+        # Hypothèse la plus simple pour Fournisseurs
+        fournisseurs_df = pd.read_sql_query("SELECT id, nom FROM fournisseurs ORDER BY nom", conn)
         return fournisseurs_df
+    except Exception as e:
+        st.error(f"Erreur lors de la lecture de la table 'fournisseurs'. Vérifiez que les colonnes 'id' et 'nom' existent : {e}")
+        return pd.DataFrame({'id':[], 'nom':[]})
     finally:
         st.session_state.conn_pool.putconn(conn)
 
-def insert_fournisseur(nom, contact, email):
+def insert_fournisseur(nom):
     conn = get_connection()
     try:
         c = conn.cursor()
-        c.execute("""INSERT INTO fournisseurs (nom, contact, email) VALUES (%s, %s, %s)""", 
-                  (nom, contact, email))
+        c.execute("""INSERT INTO fournisseurs (nom) VALUES (%s)""", (nom,)) # Simplifié
         conn.commit()
         get_fournisseurs.clear()
         return True
@@ -350,12 +363,11 @@ def insert_fournisseur(nom, contact, email):
     finally:
         st.session_state.conn_pool.putconn(conn)
         
-def update_fournisseur(fournisseur_id, nom, contact, email):
+def update_fournisseur(fournisseur_id, nom):
     conn = get_connection()
     try:
         c = conn.cursor()
-        c.execute("""UPDATE fournisseurs SET nom=%s, contact=%s, email=%s WHERE id=%s""", 
-                  (nom, contact, email, fournisseur_id))
+        c.execute("""UPDATE fournisseurs SET nom=%s WHERE id=%s""", (nom, fournisseur_id)) # Simplifié
         conn.commit()
         get_fournisseurs.clear()
         return True
@@ -376,7 +388,7 @@ def delete_fournisseur(fournisseur_id):
         return True
     except Exception as e:
         conn.rollback()
-        st.error(f"Erreur lors de la suppression du fournisseur : {e}. (Vérifiez les achats liés.)")
+        st.error(f"Erreur lors de la suppression du fournisseur : {e}.")
         return False
     finally:
         st.session_state.conn_pool.putconn(conn)
@@ -385,7 +397,6 @@ def delete_fournisseur(fournisseur_id):
 # ========== 5. DÉFINITION DES MODULES DE L'APPLICATION (CRUD INTÉGRÉ) ==========
 
 def module_gestion_fournisseurs():
-    # La vérification des accès utilise maintenant le user_id et le module
     if not has_access("fournisseurs"):
         st.error("❌ Accès refusé à la Gestion Fournisseurs.")
         log_access(st.session_state.user_id, "user", "fournisseurs", "Tentative d'accès refusée")
@@ -437,11 +448,10 @@ def module_gestion_fournisseurs():
             st.subheader("➕ Ajouter un Nouveau Fournisseur")
             with st.form("add_fournisseur_form"):
                 n_nom = st.text_input("Nom de l'Entreprise", max_chars=100)
-                n_contact = st.text_input("Nom du Contact", max_chars=100)
-                n_email = st.text_input("Email", max_chars=100)
+                # Colonnes 'contact' et 'email' supprimées pour la compatibilité minimale
                 
                 if st.form_submit_button("✅ Enregistrer le Fournisseur"):
-                    if n_nom and insert_fournisseur(n_nom, n_contact, n_email):
+                    if n_nom and insert_fournisseur(n_nom):
                         st.success(f"Fournisseur '{n_nom}' ajouté avec succès.")
                         log_access(st.session_state.user_id, "user", "fournisseurs", f"Ajout fournisseur {n_nom}")
                         st.rerun()
@@ -466,11 +476,10 @@ def module_gestion_fournisseurs():
                 
                 with st.form("update_fournisseur_form"):
                     u_nom = st.text_input("Nom de l'Entreprise", value=current_data['nom'], max_chars=100)
-                    u_contact = st.text_input("Nom du Contact", value=current_data['contact'], max_chars=100)
-                    u_email = st.text_input("Email", value=current_data['email'], max_chars=100)
+                    # Colonnes 'contact' et 'email' supprimées pour la compatibilité minimale
                     
                     if st.form_submit_button("💾 Enregistrer les Modifications Fournisseur"):
-                        if u_nom and update_fournisseur(fournisseur_id_to_update, u_nom, u_contact, u_email):
+                        if u_nom and update_fournisseur(fournisseur_id_to_update, u_nom):
                             st.success(f"Fournisseur '{u_nom}' (ID: {fournisseur_id_to_update}) mis à jour avec succès.")
                             log_access(st.session_state.user_id, "user", "fournisseurs", f"Mise à jour fournisseur ID {fournisseur_id_to_update}")
                             st.rerun()
@@ -534,13 +543,10 @@ def module_gestion_clients():
             st.subheader("➕ Ajouter un Nouveau Client")
             with st.form("add_client_form"):
                 n_nom = st.text_input("Nom de l'Entreprise/Contact", max_chars=100)
-                n_email = st.text_input("Email", max_chars=100)
-                n_telephone = st.text_input("Téléphone", max_chars=50)
-                n_ville = st.text_input("Ville", max_chars=50)
-                n_pays = st.text_input("Pays", max_chars=50)
+                # Colonnes 'email', 'telephone', 'ville', 'pays' supprimées pour la compatibilité minimale
                 
                 if st.form_submit_button("✅ Enregistrer le Client"):
-                    if n_nom and insert_client(n_nom, n_email, n_telephone, n_ville, n_pays):
+                    if n_nom and insert_client(n_nom):
                         st.success(f"Client '{n_nom}' ajouté avec succès.")
                         log_access(st.session_state.user_id, "user", "clients", f"Ajout client {n_nom}")
                         st.rerun()
@@ -565,13 +571,10 @@ def module_gestion_clients():
                 
                 with st.form("update_client_form"):
                     u_nom = st.text_input("Nom de l'Entreprise/Contact", value=current_data['nom'], max_chars=100)
-                    u_email = st.text_input("Email", value=current_data['email'], max_chars=100)
-                    u_telephone = st.text_input("Téléphone", value=current_data['telephone'], max_chars=50)
-                    u_ville = st.text_input("Ville", value=current_data['ville'], max_chars=50)
-                    u_pays = st.text_input("Pays", value=current_data['pays'], max_chars=50)
+                    # Colonnes 'email', 'telephone', 'ville', 'pays' supprimées pour la compatibilité minimale
                     
                     if st.form_submit_button("💾 Enregistrer les Modifications Client"):
-                        if u_nom and update_client(client_id_to_update, u_nom, u_email, u_telephone, u_ville, u_pays):
+                        if u_nom and update_client(client_id_to_update, u_nom):
                             st.success(f"Client '{u_nom}' (ID: {client_id_to_update}) mis à jour avec succès.")
                             log_access(st.session_state.user_id, "user", "clients", f"Mise à jour client ID {client_id_to_update}")
                             st.rerun()
@@ -583,7 +586,7 @@ def module_gestion_clients():
             st.info("Aucun client à modifier.")
 
 
-# --- Module Gestion Produits (CRUD) ---
+# --- Module Gestion Produits (CRUD SIMPLIFIÉ) ---
 
 def module_gestion_produits():
     if not has_access("produits"):
@@ -611,7 +614,7 @@ def module_gestion_produits():
                 
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    product_map = {row['id']: f"{row['nom']} ({row['reference']})" for index, row in products_df.iterrows()}
+                    product_map = {row['id']: f"{row['nom']} (ID: {row['id']})" for index, row in products_df.iterrows()}
                     if not product_map:
                         product_id_to_delete = None
                     else:
@@ -635,17 +638,15 @@ def module_gestion_produits():
             st.subheader("➕ Ajouter un Nouveau Produit")
             with st.form("add_product_form"):
                 n_nom = st.text_input("Nom du Produit", max_chars=100)
-                n_reference = st.text_input("Référence (Code Produit)", max_chars=50)
-                n_stock = st.number_input("Stock Initial", min_value=0, value=0)
-                n_prix_vente = st.number_input("Prix de Vente Unitaire (DH)", min_value=0.01, value=1.0, format="%.2f")
+                # Colonnes 'reference', 'stock', 'prix_vente' supprimées pour la compatibilité minimale
                 
                 if st.form_submit_button("✅ Enregistrer le Produit"):
-                    if n_nom and n_reference and insert_product(n_nom, n_reference, n_stock, n_prix_vente):
+                    if n_nom and insert_product(n_nom):
                         st.success(f"Produit '{n_nom}' ajouté avec succès.")
                         log_access(st.session_state.user_id, "user", "produits", f"Ajout produit {n_nom}")
                         st.rerun()
-                    elif not n_nom or not n_reference:
-                        st.error("Le nom et la référence du produit sont obligatoires.")
+                    elif not n_nom:
+                        st.error("Le nom du produit est obligatoire.")
         else:
             st.warning("Vous n'avez pas les permissions d'écriture pour ajouter des produits.")
 
@@ -654,7 +655,7 @@ def module_gestion_produits():
         if has_access("produits", "ecriture") and not products_df.empty:
             st.subheader("✏️ Modifier les Informations d'un Produit")
             
-            product_map_mod = {row['id']: f"{row['nom']} ({row['reference']})" for index, row in products_df.iterrows()}
+            product_map_mod = {row['id']: f"{row['nom']} (ID: {row['id']})" for index, row in products_df.iterrows()}
             product_id_to_update = st.selectbox("Sélectionnez le produit à modifier", 
                                                 options=list(product_map_mod.keys()),
                                                 format_func=lambda x: product_map_mod[x],
@@ -665,17 +666,15 @@ def module_gestion_produits():
                 
                 with st.form("update_product_form"):
                     u_nom = st.text_input("Nom du Produit", value=current_data['nom'], max_chars=100)
-                    u_reference = st.text_input("Référence (Code Produit)", value=current_data['reference'], max_chars=50)
-                    u_stock = st.number_input("Stock Actuel", min_value=0, value=int(current_data['stock']))
-                    u_prix_vente = st.number_input("Prix de Vente Unitaire (DH)", value=float(current_data['prix_vente']), min_value=0.01, format="%.2f")
+                    # Colonnes 'reference', 'stock', 'prix_vente' supprimées pour la compatibilité minimale
                     
                     if st.form_submit_button("💾 Enregistrer les Modifications Produit"):
-                        if u_nom and u_reference and update_product(product_id_to_update, u_nom, u_reference, u_stock, u_prix_vente):
+                        if u_nom and update_product(product_id_to_update, u_nom):
                             st.success(f"Produit '{u_nom}' mis à jour avec succès.")
                             log_access(st.session_state.user_id, "user", "produits", f"Mise à jour produit ID {product_id_to_update}")
                             st.rerun()
-                        elif not u_nom or not u_reference:
-                            st.error("Le nom et la référence du produit sont obligatoires.")
+                        elif not u_nom:
+                            st.error("Le nom du produit est obligatoire.")
         elif not has_access("produits", "ecriture"):
             st.warning("Vous n'avez pas les permissions d'écriture pour modifier des produits.")
         else:
@@ -804,7 +803,7 @@ else:
         st.sidebar.markdown(f"""
         <div style="background-color: #f8fafc; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0;">
             <p style="margin: 0; font-size: 11px; color: #64748b; text-align: center;">
-                <strong style="color: #1e40af;">SYGEP v7.0</strong><br>
+                <strong style="color: #1e40af;">SYGEP v7.2 ADAPTÉ</strong><br>
                 🌐 Mode Adapté Activé
             </p>
             <hr style="margin: 10px 0; border: 0; border-top: 1px solid #cbd5e1;">
