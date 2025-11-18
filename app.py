@@ -719,15 +719,25 @@ elif menu == "Gestion des Clients":
                         conn = get_connection()
                         try:
                             c = conn.cursor()
-                            c.execute("DELETE FROM clients WHERE id=%s", (int(client_id),))
-                            conn.commit()
-                            log_access(st.session_state.user_id, "clients", f"Suppression ID:{client_id}")
-                            st.success("✅ Client supprimé avec succès!")
-                            get_clients.clear()
-                            st.rerun()
+                            
+                            # Vérifier si le client a des commandes
+                            c.execute("SELECT COUNT(*) FROM commandes WHERE client_id=%s", (int(client_id),))
+                            nb_commandes = c.fetchone()[0]
+                            
+                            if nb_commandes > 0:
+                                st.error(f"❌ Impossible de supprimer ce client !\n\n"
+                                        f"Il possède {nb_commandes} commande(s) enregistrée(s).\n\n"
+                                        f"💡 Supprimez d'abord ses commandes ou archivez le client.")
+                            else:
+                                c.execute("DELETE FROM clients WHERE id=%s", (int(client_id),))
+                                conn.commit()
+                                log_access(st.session_state.user_id, "clients", f"Suppression ID:{client_id}")
+                                st.success("✅ Client supprimé avec succès!")
+                                get_clients.clear()
+                                st.rerun()
                         except Exception as e:
                             conn.rollback()
-                            st.error(f"❌ Erreur: {e}")
+                            st.error(f"❌ Erreur technique: {e}")
                         finally:
                             release_connection(conn)
         else:
@@ -883,15 +893,30 @@ elif menu == "Gestion des Produits":
                             conn = get_connection()
                             try:
                                 c = conn.cursor()
-                                c.execute("DELETE FROM produits WHERE id=%s", (int(prod_del_id),))
-                                conn.commit()
-                                log_access(st.session_state.user_id, "produits", f"Suppression ID:{prod_del_id}")
-                                st.success("✅ Produit supprimé!")
-                                get_produits.clear()
-                                st.rerun()
+                                
+                                # Vérifier si le produit est utilisé dans des commandes ou achats
+                                c.execute("SELECT COUNT(*) FROM commandes WHERE produit_id=%s", (int(prod_del_id),))
+                                nb_commandes = c.fetchone()[0]
+                                
+                                c.execute("SELECT COUNT(*) FROM achats WHERE produit_id=%s", (int(prod_del_id),))
+                                nb_achats = c.fetchone()[0]
+                                
+                                if nb_commandes > 0 or nb_achats > 0:
+                                    st.error(f"❌ Impossible de supprimer ce produit !\n\n"
+                                            f"Il est référencé dans :\n"
+                                            f"- {nb_commandes} commande(s)\n"
+                                            f"- {nb_achats} achat(s)\n\n"
+                                            f"💡 Supprimez d'abord ces enregistrements ou archivez le produit.")
+                                else:
+                                    c.execute("DELETE FROM produits WHERE id=%s", (int(prod_del_id),))
+                                    conn.commit()
+                                    log_access(st.session_state.user_id, "produits", f"Suppression ID:{prod_del_id}")
+                                    st.success("✅ Produit supprimé!")
+                                    get_produits.clear()
+                                    st.rerun()
                             except Exception as e:
                                 conn.rollback()
-                                st.error(f"❌ Erreur: {e}")
+                                st.error(f"❌ Erreur technique: {e}")
                             finally:
                                 release_connection(conn)
         else:
@@ -1028,15 +1053,25 @@ elif menu == "Gestion des Fournisseurs":
                         conn = get_connection()
                         try:
                             c = conn.cursor()
-                            c.execute("DELETE FROM fournisseurs WHERE id=%s", (int(fournisseur_id),)) 
-                            conn.commit()
-                            log_access(st.session_state.user_id, "fournisseurs", f"Suppression ID:{fournisseur_id}")
-                            st.success("✅ Fournisseur supprimé!")
-                            get_fournisseurs.clear()
-                            st.rerun()
+                            
+                            # Vérifier si le fournisseur a des achats
+                            c.execute("SELECT COUNT(*) FROM achats WHERE fournisseur_id=%s", (int(fournisseur_id),))
+                            nb_achats = c.fetchone()[0]
+                            
+                            if nb_achats > 0:
+                                st.error(f"❌ Impossible de supprimer ce fournisseur !\n\n"
+                                        f"Il possède {nb_achats} achat(s) enregistré(s).\n\n"
+                                        f"💡 Supprimez d'abord ses achats ou archivez le fournisseur.")
+                            else:
+                                c.execute("DELETE FROM fournisseurs WHERE id=%s", (int(fournisseur_id),)) 
+                                conn.commit()
+                                log_access(st.session_state.user_id, "fournisseurs", f"Suppression ID:{fournisseur_id}")
+                                st.success("✅ Fournisseur supprimé!")
+                                get_fournisseurs.clear()
+                                st.rerun()
                         except Exception as e:
                             conn.rollback()
-                            st.error(f"❌ Erreur: {e}")
+                            st.error(f"❌ Erreur technique: {e}")
                         finally:
                             release_connection(conn)
         else:
@@ -1134,5 +1169,199 @@ elif menu == "Gestion des Fournisseurs":
                             else:
                                 st.error("❌ Le nom est obligatoire")
 
-# ========== RESTE DU CODE (Commandes, Achats, Utilisateurs, etc.) ==========
+# ========== GESTION DES COMMANDES (NOUVEAU BLOC AJOUTÉ) ==========
+elif menu == "Gestion des Commandes":
+    if not has_access("commandes"):
+        st.error("❌ Accès refusé")
+        st.stop()
+
+    log_access(st.session_state.user_id, "commandes", "Consultation")
+    st.header("🛒 Gestion des Commandes")
+
+    tab1, tab2, tab3 = st.tabs(["📋 Liste", "➕ Ajouter (Interne)", "✏️ Gérer Statut"])
+    
+    commandes = get_commandes()
+    clients = get_clients()
+    produits = get_produits()
+
+    with tab1:
+        if not commandes.empty:
+            st.dataframe(commandes, use_container_width=True, hide_index=True)
+
+            if has_access("commandes", "ecriture"):
+                st.divider()
+                st.subheader("🗑️ Supprimer une Commande")
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    commande_id = st.selectbox("Sélectionner la commande à supprimer", commandes['id'].tolist(),
+                                            format_func=lambda x: f"Cmd #{x} - {commandes[commandes['id']==x]['client'].iloc[0]} ({commandes[commandes['id']==x]['statut'].iloc[0]})")
+                with col2:
+                    st.write("")
+                    st.write("")
+                    if st.button("🗑️ Supprimer la Commande", type="secondary"):
+                        conn = get_connection()
+                        try:
+                            c = conn.cursor()
+                            
+                            # Récupérer les infos de la commande pour un potentiel rollback de stock
+                            c.execute("SELECT produit_id, quantite, statut FROM commandes WHERE id=%s", (int(commande_id),))
+                            cmd_data = c.fetchone()
+                            
+                            if cmd_data:
+                                produit_id, quantite, statut = cmd_data
+                                
+                                # Si la commande était Livrée ou En cours, on doit remettre le stock
+                                if statut in ['Livrée', 'En cours']:
+                                    st.warning("⚠️ ATTENTION: Remise en stock automatique du produit.")
+                                    c.execute("UPDATE produits SET stock = stock + %s WHERE id = %s", (quantite, produit_id))
+
+                                c.execute("DELETE FROM commandes WHERE id=%s", (int(commande_id),)) 
+                                conn.commit()
+                                log_access(st.session_state.user_id, "commandes", f"Suppression ID:{commande_id} (Rollback stock si nécessaire)")
+                                st.success("✅ Commande supprimée!")
+                                get_commandes.clear()
+                                get_produits.clear()
+                                get_pending_orders_count.clear()
+                                st.rerun()
+                            else:
+                                st.error("❌ Commande introuvable.")
+
+                        except Exception as e:
+                            conn.rollback()
+                            st.error(f"❌ Erreur technique: {e}")
+                        finally:
+                            release_connection(conn)
+        else:
+            st.info("📭 Aucune commande enregistrée")
+
+    with tab2:
+        if not has_access("commandes", "ecriture"):
+            st.warning("⚠️ Vous n'avez pas les droits d'écriture")
+        else:
+            st.subheader("➕ Ajouter une Nouvelle Commande (Interne)")
+            if clients.empty or produits.empty:
+                st.warning("⚠️ Veuillez ajouter des clients et des produits avant de créer une commande.")
+            else:
+                produits_disponibles = produits[produits['stock'] > 0]
+                if produits_disponibles.empty:
+                    st.error("❌ Aucun produit en stock disponible.")
+                else:
+                    with st.form("form_add_commande"):
+                        client_map = {f"{r['nom']} ({r['email']})": r['id'] for _, r in clients.iterrows()}
+                        selected_client_label = st.selectbox("Client *", list(client_map.keys()))
+                        client_id = client_map[selected_client_label] if selected_client_label else None
+
+                        produits_map = {f"{r['nom']} - {r['prix']:.2f} € (Stock: {r['stock']})": r['id'] for _, r in produits_disponibles.iterrows()}
+                        selected_product_label = st.selectbox("Produit *", list(produits_map.keys()))
+                        
+                        quantite = 0
+                        produit_id = None
+                        produit_data = None
+
+                        if selected_product_label:
+                            produit_id = produits_map[selected_product_label]
+                            produit_data = produits_disponibles[produits_disponibles['id'] == produit_id].iloc[0]
+                            quantite_max = produit_data['stock']
+                            quantite = st.number_input("Quantité *", min_value=1, max_value=int(quantite_max), step=1, value=1)
+                            st.info(f"Montant estimé: **{produit_data['prix'] * quantite:.2f} €**")
+
+                        statut = st.selectbox("Statut Initial", ['En attente', 'En cours', 'Livrée', 'Annulée'], index=0)
+
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            submit = st.form_submit_button("✅ Enregistrer", use_container_width=True, type="primary")
+                        with col2:
+                            cancel = st.form_submit_button("❌ Annuler", use_container_width=True)
+                        
+                        if submit:
+                            if client_id and produit_id and quantite > 0:
+                                conn = get_connection()
+                                try:
+                                    c = conn.cursor()
+                                    quantite_py = int(quantite)
+                                    produit_id_py = int(produit_id)
+                                    
+                                    # Mise à jour du stock
+                                    if statut != 'Annulée':
+                                        c.execute("UPDATE produits SET stock = stock - %s WHERE id = %s", (quantite_py, produit_id_py))
+                                    
+                                    # Insertion de la commande
+                                    c.execute("""INSERT INTO commandes (client_id, produit_id, quantite, date, statut) 
+                                                VALUES (%s, %s, %s, CURRENT_DATE, %s)""",
+                                              (int(client_id), produit_id_py, quantite_py, statut))
+                                    
+                                    conn.commit()
+                                    log_access(st.session_state.user_id, "commandes", f"Ajout: Cmd pour Client ID:{client_id}")
+                                    st.success(f"✅ Commande enregistrée et stock mis à jour (si statut non 'Annulée')!")
+                                    get_commandes.clear()
+                                    get_produits.clear()
+                                    get_pending_orders_count.clear()
+                                    st.rerun()
+                                except Exception as e:
+                                    conn.rollback()
+                                    st.error(f"❌ Erreur: {e}")
+                                finally:
+                                    release_connection(conn)
+                            else:
+                                st.error("❌ Tous les champs obligatoires (Client, Produit, Quantité > 0) doivent être remplis.")
+
+    with tab3:
+        if not has_access("commandes", "ecriture"):
+            st.warning("⚠️ Vous n'avez pas les droits d'écriture")
+        else:
+            st.subheader("✏️ Modifier le Statut d'une Commande")
+            if commandes.empty:
+                st.info("📭 Aucune commande à gérer")
+            else:
+                # Filtrer les commandes qui ne sont pas encore Livrées/Annulées pour simplifier la gestion
+                commandes_actives = commandes[commandes['statut'].isin(['En attente', 'En cours'])]
+                
+                if commandes_actives.empty:
+                    st.info("📭 Aucune commande active (En attente/En cours) à modifier.")
+                    return
+
+                commande_id_update = st.selectbox("Sélectionner la commande à modifier", 
+                                                commandes_actives['id'].tolist(),
+                                                format_func=lambda x: f"Cmd #{x} - {commandes_actives[commandes_actives['id']==x]['client'].iloc[0]} (Actuel: {commandes_actives[commandes_actives['id']==x]['statut'].iloc[0]})")
+                
+                if commande_id_update:
+                    cmd_data = commandes_actives[commandes_actives['id'] == commande_id_update].iloc[0]
+                    current_statut = cmd_data['statut']
+                    
+                    with st.form("form_update_commande_statut"):
+                        new_statut = st.selectbox("Nouveau Statut *", 
+                                                  ['En attente', 'En cours', 'Livrée', 'Annulée'],
+                                                  index=['En attente', 'En cours', 'Livrée', 'Annulée'].index(current_statut))
+                        
+                        st.info("💡 Seules les commandes passées en 'Livrée' ou 'Annulée' ont un impact sur le stock.")
+
+                        submit_update = st.form_submit_button("✅ Mettre à Jour le Statut", use_container_width=True, type="primary")
+                        
+                        if submit_update:
+                            if new_statut != current_statut:
+                                conn = get_connection()
+                                try:
+                                    c = conn.cursor()
+                                    
+                                    # Pas besoin de gérer le stock ici car il a été déduit à l'ajout (sauf si annulation)
+                                    
+                                    c.execute("UPDATE commandes SET statut=%s WHERE id=%s",
+                                              (new_statut, int(commande_id_update)))
+                                    
+                                    conn.commit()
+                                    log_access(st.session_state.user_id, "commandes", f"Modification Statut ID:{commande_id_update} vers {new_statut}")
+                                    st.success(f"✅ Statut de la commande #{commande_id_update} mis à jour à '{new_statut}'!")
+                                    get_commandes.clear()
+                                    get_pending_orders_count.clear()
+                                    st.rerun()
+                                except Exception as e:
+                                    conn.rollback()
+                                    st.error(f"❌ Erreur: {e}")
+                                finally:
+                                    release_connection(conn)
+                            else:
+                                st.info("Le statut n'a pas été modifié.")
+
+
+# ========== RESTE DU CODE (Achats, Utilisateurs, etc.) ==========
 # Le code pour les autres modules reste identique...
