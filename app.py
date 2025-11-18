@@ -12,7 +12,7 @@ load_dotenv()
 
 # Configuration de la page
 st.set_page_config(
-    page_title="SYGEP - Système de Gestion d'Entreprise Pédagogique (v5.0)",
+    page_title="SYGEP - Système de Gestion d'Entreprise Pédagogique (v6.0)",
     layout="wide",
     page_icon="🎓",
     initial_sidebar_state="expanded"
@@ -64,7 +64,7 @@ def hash_password(password):
 
 def log_access(entity_id, entity_type, module, action):
     """Enregistre l'action de l'utilisateur/client dans la table logs_access (uniquement pour les utilisateurs UUID)."""
-    if entity_type == 'user':
+    if entity_type == 'user' and 'user_id' in st.session_state:
         conn = get_connection()
         try:
             c = conn.cursor()
@@ -125,7 +125,7 @@ def has_access(module, access_type="lecture"):
     if st.session_state.get('is_client'):
         return module in ["espace_client", "notifications", "dashboard"] 
 
-    if st.session_state.role_id == 1:
+    if st.session_state.role_id == 1: # Admin a tout
         return True
     
     conn = get_connection()
@@ -160,7 +160,7 @@ def authenticate_internal():
     
     if user_id:
         st.session_state.logged_in = True
-        st.session_state.is_client = False # Non client
+        st.session_state.is_client = False
         st.session_state.user_id = user_id
         st.session_state.user_name = nom_complet
         st.session_state.role_name = role_name
@@ -212,6 +212,8 @@ def logout():
 
 # ========== 4. FONCTIONS DE GESTION DE DONNÉES (CRUD) ==========
 
+# --- CRUD Clients ---
+
 @st.cache_data(ttl=60)
 def get_clients():
     conn = get_connection()
@@ -257,6 +259,7 @@ def delete_client(client_id):
     conn = get_connection()
     try:
         c = conn.cursor()
+        # Suppression potentielle de commandes associées (ou utiliser CASCADE sur la DB)
         c.execute("DELETE FROM clients WHERE id=%s", (client_id,))
         conn.commit()
         get_clients.clear()
@@ -267,6 +270,8 @@ def delete_client(client_id):
         return False
     finally:
         st.session_state.conn_pool.putconn(conn)
+
+# --- CRUD Produits ---
 
 @st.cache_data(ttl=60)
 def get_products():
@@ -323,10 +328,171 @@ def delete_product(product_id):
         return False
     finally:
         st.session_state.conn_pool.putconn(conn)
+
+# --- CRUD Fournisseurs (NOUVEAU) ---
+
+@st.cache_data(ttl=60)
+def get_fournisseurs():
+    """Récupère la liste de tous les fournisseurs."""
+    conn = get_connection()
+    try:
+        fournisseurs_df = pd.read_sql_query("SELECT id, nom, contact, email FROM fournisseurs ORDER BY nom", conn)
+        return fournisseurs_df
+    finally:
+        st.session_state.conn_pool.putconn(conn)
+
+def insert_fournisseur(nom, contact, email):
+    """Ajoute un nouveau fournisseur."""
+    conn = get_connection()
+    try:
+        c = conn.cursor()
+        c.execute("""INSERT INTO fournisseurs (nom, contact, email) VALUES (%s, %s, %s)""", 
+                  (nom, contact, email))
+        conn.commit()
+        get_fournisseurs.clear()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erreur lors de l'ajout du fournisseur : {e}")
+        return False
+    finally:
+        st.session_state.conn_pool.putconn(conn)
         
-# ... (Les fonctions pour les commandes, notifications sont inchangées)
+def update_fournisseur(fournisseur_id, nom, contact, email):
+    """Met à jour les informations d'un fournisseur existant."""
+    conn = get_connection()
+    try:
+        c = conn.cursor()
+        c.execute("""UPDATE fournisseurs SET nom=%s, contact=%s, email=%s WHERE id=%s""", 
+                  (nom, contact, email, fournisseur_id))
+        conn.commit()
+        get_fournisseurs.clear()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erreur lors de la mise à jour du fournisseur : {e}")
+        return False
+    finally:
+        st.session_state.conn_pool.putconn(conn)
+
+def delete_fournisseur(fournisseur_id):
+    """Supprime un fournisseur."""
+    conn = get_connection()
+    try:
+        c = conn.cursor()
+        # Suppression potentielle des achats associés (ou utiliser CASCADE sur la DB)
+        c.execute("DELETE FROM fournisseurs WHERE id=%s", (fournisseur_id,))
+        conn.commit()
+        get_fournisseurs.clear()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erreur lors de la suppression du fournisseur : {e}. (Vérifiez les achats liés.)")
+        return False
+    finally:
+        st.session_state.conn_pool.putconn(conn)
+
 
 # ========== 5. DÉFINITION DES MODULES DE L'APPLICATION (CRUD INTÉGRÉ) ==========
+
+# --- Module Gestion Fournisseurs (NOUVEAU - CRUD) ---
+
+def module_gestion_fournisseurs():
+    if not has_access("fournisseurs"):
+        st.error("❌ Accès refusé à la Gestion Fournisseurs.")
+        log_access(st.session_state.user_id, "user", "fournisseurs", "Tentative d'accès refusée")
+        return
+        
+    log_access(st.session_state.user_id, "user", "fournisseurs", "Consultation")
+    st.header("👤 Gestion des Fournisseurs")
+    
+    fournisseurs_df = get_fournisseurs()
+    
+    tab1, tab2, tab3 = st.tabs(["📋 Liste / Supprimer", "➕ Ajouter", "✏️ Modifier"])
+    
+    # 1. Liste / Supprimer
+    with tab1:
+        if fournisseurs_df.empty:
+            st.info("Aucun fournisseur enregistré.")
+        else:
+            st.dataframe(fournisseurs_df, use_container_width=True, hide_index=True)
+            
+            if has_access("fournisseurs", "ecriture"):
+                st.divider()
+                st.subheader("🗑️ Suppression d'un Fournisseur")
+                
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    fournisseur_map = {row['id']: f"{row['nom']} (ID: {row['id']})" for index, row in fournisseurs_df.iterrows()}
+                    
+                    if not fournisseur_map:
+                        st.info("Aucun fournisseur à supprimer.")
+                        fournisseur_id_to_delete = None
+                    else:
+                        fournisseur_id_to_delete = st.selectbox("Sélectionnez le fournisseur à supprimer", 
+                                                           options=list(fournisseur_map.keys()),
+                                                           format_func=lambda x: fournisseur_map[x],
+                                                           key="delete_fournisseur_id")
+                with col2:
+                    st.write("")
+                    if fournisseur_id_to_delete and st.button("🗑️ Confirmer la Suppression Fournisseur", type="primary"):
+                        if delete_fournisseur(fournisseur_id_to_delete):
+                            st.success(f"✅ Fournisseur ID {fournisseur_id_to_delete} supprimé.")
+                            log_access(st.session_state.user_id, "user", "fournisseurs", f"Suppression fournisseur ID {fournisseur_id_to_delete}")
+                            st.rerun()
+            else:
+                st.info("Vous n'avez pas les permissions d'écriture pour supprimer des fournisseurs.")
+
+    # 2. Ajouter
+    with tab2:
+        if has_access("fournisseurs", "ecriture"):
+            st.subheader("➕ Ajouter un Nouveau Fournisseur")
+            with st.form("add_fournisseur_form"):
+                n_nom = st.text_input("Nom de l'Entreprise", max_chars=100)
+                n_contact = st.text_input("Nom du Contact", max_chars=100)
+                n_email = st.text_input("Email", max_chars=100)
+                
+                if st.form_submit_button("✅ Enregistrer le Fournisseur"):
+                    if n_nom and insert_fournisseur(n_nom, n_contact, n_email):
+                        st.success(f"Fournisseur '{n_nom}' ajouté avec succès.")
+                        log_access(st.session_state.user_id, "user", "fournisseurs", f"Ajout fournisseur {n_nom}")
+                        st.rerun()
+                    elif not n_nom:
+                        st.error("Le nom du fournisseur est obligatoire.")
+        else:
+            st.warning("Vous n'avez pas les permissions d'écriture pour ajouter des fournisseurs.")
+
+    # 3. Modifier
+    with tab3:
+        if has_access("fournisseurs", "ecriture") and not fournisseurs_df.empty:
+            st.subheader("✏️ Modifier les Informations d'un Fournisseur")
+            
+            fournisseur_map_mod = {row['id']: f"{row['nom']} (ID: {row['id']})" for index, row in fournisseurs_df.iterrows()}
+            fournisseur_id_to_update = st.selectbox("Sélectionnez le fournisseur à modifier", 
+                                               options=list(fournisseur_map_mod.keys()),
+                                               format_func=lambda x: fournisseur_map_mod[x],
+                                               key="update_fournisseur_id")
+                                               
+            if fournisseur_id_to_update:
+                current_data = fournisseurs_df[fournisseurs_df['id'] == fournisseur_id_to_update].iloc[0]
+                
+                with st.form("update_fournisseur_form"):
+                    u_nom = st.text_input("Nom de l'Entreprise", value=current_data['nom'], max_chars=100)
+                    u_contact = st.text_input("Nom du Contact", value=current_data['contact'], max_chars=100)
+                    u_email = st.text_input("Email", value=current_data['email'], max_chars=100)
+                    
+                    if st.form_submit_button("💾 Enregistrer les Modifications Fournisseur"):
+                        if u_nom and update_fournisseur(fournisseur_id_to_update, u_nom, u_contact, u_email):
+                            st.success(f"Fournisseur '{u_nom}' (ID: {fournisseur_id_to_update}) mis à jour avec succès.")
+                            log_access(st.session_state.user_id, "user", "fournisseurs", f"Mise à jour fournisseur ID {fournisseur_id_to_update}")
+                            st.rerun()
+                        elif not u_nom:
+                            st.error("Le nom du fournisseur est obligatoire.")
+        elif not has_access("fournisseurs", "ecriture"):
+            st.warning("Vous n'avez pas les permissions d'écriture pour modifier des fournisseurs.")
+        else:
+            st.info("Aucun fournisseur à modifier.")
+
 
 # --- Module Gestion Clients (CRUD) ---
 
@@ -356,15 +522,17 @@ def module_gestion_clients():
                 
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    # Crée un dictionnaire pour afficher le nom du client dans le selectbox
                     client_map = {row['id']: f"{row['nom']} (ID: {row['id']})" for index, row in clients_df.iterrows()}
-                    client_id_to_delete = st.selectbox("Sélectionnez le client à supprimer", 
+                    if not client_map:
+                        client_id_to_delete = None
+                    else:
+                        client_id_to_delete = st.selectbox("Sélectionnez le client à supprimer", 
                                                        options=list(client_map.keys()),
                                                        format_func=lambda x: client_map[x],
                                                        key="delete_client_id")
                 with col2:
                     st.write("")
-                    if st.button("🗑️ Confirmer la Suppression", type="primary"):
+                    if client_id_to_delete and st.button("🗑️ Confirmer la Suppression Client", type="primary"):
                         if delete_client(client_id_to_delete):
                             st.success(f"✅ Client ID {client_id_to_delete} supprimé.")
                             log_access(st.session_state.user_id, "user", "clients", f"Suppression client ID {client_id_to_delete}")
@@ -404,7 +572,6 @@ def module_gestion_clients():
                                                format_func=lambda x: client_map_mod[x],
                                                key="update_client_id")
                                                
-            # Pré-remplir le formulaire avec les données actuelles
             if client_id_to_update:
                 current_data = clients_df[clients_df['id'] == client_id_to_update].iloc[0]
                 
@@ -415,7 +582,7 @@ def module_gestion_clients():
                     u_ville = st.text_input("Ville", value=current_data['ville'], max_chars=50)
                     u_pays = st.text_input("Pays", value=current_data['pays'], max_chars=50)
                     
-                    if st.form_submit_button("💾 Enregistrer les Modifications"):
+                    if st.form_submit_button("💾 Enregistrer les Modifications Client"):
                         if u_nom and update_client(client_id_to_update, u_nom, u_email, u_telephone, u_ville, u_pays):
                             st.success(f"Client '{u_nom}' (ID: {client_id_to_update}) mis à jour avec succès.")
                             log_access(st.session_state.user_id, "user", "clients", f"Mise à jour client ID {client_id_to_update}")
@@ -457,13 +624,16 @@ def module_gestion_produits():
                 col1, col2 = st.columns([3, 1])
                 with col1:
                     product_map = {row['id']: f"{row['nom']} ({row['reference']})" for index, row in products_df.iterrows()}
-                    product_id_to_delete = st.selectbox("Sélectionnez le produit à supprimer", 
+                    if not product_map:
+                        product_id_to_delete = None
+                    else:
+                        product_id_to_delete = st.selectbox("Sélectionnez le produit à supprimer", 
                                                         options=list(product_map.keys()),
                                                         format_func=lambda x: product_map[x],
                                                         key="delete_product_id")
                 with col2:
                     st.write("")
-                    if st.button("🗑️ Confirmer la Suppression Produit", type="primary"):
+                    if product_id_to_delete and st.button("🗑️ Confirmer la Suppression Produit", type="primary"):
                         if delete_product(product_id_to_delete):
                             st.success(f"✅ Produit ID {product_id_to_delete} supprimé.")
                             log_access(st.session_state.user_id, "user", "produits", f"Suppression produit ID {product_id_to_delete}")
@@ -523,10 +693,10 @@ def module_gestion_produits():
         else:
             st.info("Aucun produit à modifier.")
 
-# --- Autres modules (inchangés ou placeholders) ---
+
+# --- Autres modules (placeholders) ---
 
 def module_espace_client():
-    # ... (Code inchangé pour la commande client externe)
     if not (st.session_state.get('is_client') or st.session_state.role_name == 'admin'):
         st.error("❌ Accès refusé à l'Espace Client.")
         return
@@ -535,7 +705,6 @@ def module_espace_client():
     st.info("Ce module nécessite la logique de commande complète.") # Placeholder for brevity
 
 def module_dashboard():
-    # ... (Code inchangé)
     st.title(f"🚀 Tableau de Bord - Bienvenue, {st.session_state.user_name.split()[0]}!")
     if not st.session_state.get('is_client'):
         log_access(st.session_state.user_id, "user", "Dashboard", "Consultation")
@@ -545,7 +714,6 @@ def module_dashboard():
     st.divider()
 
 def module_notifications():
-    # ... (Code inchangé)
     if st.session_state.get('is_client'):
         st.header("🔔 Suivi des Commandes")
         st.info("Ce module est en cours de développement. Vous y verrez bientôt le statut de vos commandes.")
@@ -570,7 +738,7 @@ if 'logged_in' not in st.session_state:
     st.session_state.is_client = False
 
 if not st.session_state.logged_in:
-    # --- Écran de Connexion (inchangé) ---
+    # --- Écran de Connexion ---
     st.image("https://upload.wikimedia.org/wikipedia/commons/0/0e/Ofppt.png", width=150)
     st.title("🎓 SYGEP - Connexion")
     
@@ -606,7 +774,7 @@ else:
         st.caption(f"Rôle : **{st.session_state.role_name.upper()}**")
         st.divider()
 
-        # Options de navigation (inchangé)
+        # Options de navigation 
         internal_menu_options = {
             "🏠 Tableau de Bord": "dashboard",
             "🔔 Notifications": "notifications",
@@ -641,13 +809,13 @@ else:
         st.divider()
         st.button("Déconnexion", on_click=logout)
 
-        # Footer Sidebar (inchangé)
+        # Footer Sidebar 
         st.sidebar.markdown("---")
         date_footer = datetime.now().strftime('%d/%m/%Y')
         st.sidebar.markdown(f"""
         <div style="background-color: #f8fafc; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0;">
             <p style="margin: 0; font-size: 11px; color: #64748b; text-align: center;">
-                <strong style="color: #1e40af;">SYGEP v5.0</strong><br>
+                <strong style="color: #1e40af;">SYGEP v6.0</strong><br>
                 🌐 Mode Temps Réel Activé
             </p>
             <hr style="margin: 10px 0; border: 0; border-top: 1px solid #cbd5e1;">
@@ -679,5 +847,7 @@ else:
         module_gestion_clients()
     elif current_module == "produits":
         module_gestion_produits()
+    elif current_module == "fournisseurs": # <-- Appel du nouveau module CRUD
+        module_gestion_fournisseurs()
     else:
         module_placeholder(current_module, menu)
