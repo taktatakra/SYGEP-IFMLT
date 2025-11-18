@@ -37,6 +37,7 @@ def init_connection_pool():
         return connection_pool
     except Exception as e:
         try:
+            # Fallback vers st.secrets pour l'environnement Streamlit Cloud
             connection_pool = psycopg2.pool.SimpleConnectionPool(
                 1, 20,
                 host=st.secrets["supabase"]["host"],
@@ -1169,7 +1170,7 @@ elif menu == "Gestion des Fournisseurs":
                             else:
                                 st.error("❌ Le nom est obligatoire")
 
-# ========== GESTION DES COMMANDES (NOUVEAU BLOC AJOUTÉ) ==========
+# ========== GESTION DES COMMANDES ==========
 elif menu == "Gestion des Commandes":
     if not has_access("commandes"):
         st.error("❌ Accès refusé")
@@ -1309,17 +1310,13 @@ elif menu == "Gestion des Commandes":
         if not has_access("commandes", "ecriture"):
             st.warning("⚠️ Vous n'avez pas les droits d'écriture")
         else:
-            st.subheader("✏️ Modifier le Statut d'une Commande")
+            st.subheader("✏️ Gérer le Statut d'une Commande")
             if commandes.empty:
                 st.info("📭 Aucune commande à gérer")
             else:
                 # Filtrer les commandes qui ne sont pas encore Livrées/Annulées pour simplifier la gestion
-                commandes_actives = commandes[commandes['statut'].isin(['En attente', 'En cours'])]
+                commandes_actives = commandes.copy()
                 
-                if commandes_actives.empty:
-                    st.info("📭 Aucune commande active (En attente/En cours) à modifier.")
-                    return
-
                 commande_id_update = st.selectbox("Sélectionner la commande à modifier", 
                                                 commandes_actives['id'].tolist(),
                                                 format_func=lambda x: f"Cmd #{x} - {commandes_actives[commandes_actives['id']==x]['client'].iloc[0]} (Actuel: {commandes_actives[commandes_actives['id']==x]['statut'].iloc[0]})")
@@ -1333,8 +1330,6 @@ elif menu == "Gestion des Commandes":
                                                   ['En attente', 'En cours', 'Livrée', 'Annulée'],
                                                   index=['En attente', 'En cours', 'Livrée', 'Annulée'].index(current_statut))
                         
-                        st.info("💡 Seules les commandes passées en 'Livrée' ou 'Annulée' ont un impact sur le stock.")
-
                         submit_update = st.form_submit_button("✅ Mettre à Jour le Statut", use_container_width=True, type="primary")
                         
                         if submit_update:
@@ -1343,8 +1338,7 @@ elif menu == "Gestion des Commandes":
                                 try:
                                     c = conn.cursor()
                                     
-                                    # Pas besoin de gérer le stock ici car il a été déduit à l'ajout (sauf si annulation)
-                                    
+                                    # Mise à jour du statut
                                     c.execute("UPDATE commandes SET statut=%s WHERE id=%s",
                                               (new_statut, int(commande_id_update)))
                                     
@@ -1362,6 +1356,63 @@ elif menu == "Gestion des Commandes":
                             else:
                                 st.info("Le statut n'a pas été modifié.")
 
+# ========== GESTION DES ACHATS (SQUELETTE) ==========
+elif menu == "Gestion des Achats":
+    if not has_access("achats"):
+        st.error("❌ Accès refusé")
+        st.stop()
+    
+    log_access(st.session_state.user_id, "achats", "Consultation")
+    st.header("🛍️ Gestion des Achats (Fournisseurs)")
+    st.info("Cette section nécessite l'implémentation complète des fonctionnalités Ajouter/Modifier/Supprimer des Achats. Pour l'instant, voici la liste des achats.")
 
-# ========== RESTE DU CODE (Achats, Utilisateurs, etc.) ==========
-# Le code pour les autres modules reste identique...
+    achats = get_achats()
+    if not achats.empty:
+        st.dataframe(achats, use_container_width=True, hide_index=True)
+    else:
+        st.info("📭 Aucun achat enregistré.")
+
+# ========== RAPPORTS & EXPORTS (SQUELETTE) ==========
+elif menu == "Rapports & Exports":
+    if not has_access("rapports"):
+        st.error("❌ Accès refusé")
+        st.stop()
+    
+    log_access(st.session_state.user_id, "rapports", "Consultation")
+    st.header("📊 Rapports & Exports")
+    st.info("Cette section est dédiée à la génération de rapports de performance (CA, Marge, Stock) et l'export de données.")
+
+    # Exemple de rapport
+    commandes = get_commandes()
+    st.subheader("Commandes par Statut")
+    if not commandes.empty:
+        st.bar_chart(commandes['statut'].value_counts())
+    
+# ========== GESTION DES UTILISATEURS (SQUELETTE) ==========
+elif menu == "Gestion des Utilisateurs":
+    if not has_access("utilisateurs"):
+        st.error("❌ Accès refusé")
+        st.stop()
+    
+    log_access(st.session_state.user_id, "utilisateurs", "Consultation")
+    st.header("🔑 Gestion des Utilisateurs et Permissions")
+    st.info("Cette section permet de gérer les utilisateurs, leurs rôles et les permissions d'accès aux modules (Lecture/Écriture).")
+    
+    # Affichage des utilisateurs
+    conn = get_connection()
+    try:
+        df_users = pd.read_sql_query("SELECT id, username, role, date_creation FROM utilisateurs ORDER BY id", conn)
+        st.subheader("Liste des Utilisateurs")
+        st.dataframe(df_users, use_container_width=True)
+    finally:
+        release_connection(conn)
+
+# ========== À PROPOS (SQUELETTE) ==========
+elif menu == "À Propos":
+    st.header("ℹ️ À Propos du SYGEP")
+    st.info("Application pédagogique développée dans le cadre de la formation professionnelle à l'OFPPT.")
+    st.markdown("""
+        - **Version :** 1.0.0
+        - **Développeur :** ISMAILI ALAOUI MOHAMED
+        - **Technologies :** Streamlit, Python, PostgreSQL (Supabase)
+    """)
