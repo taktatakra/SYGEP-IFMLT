@@ -149,32 +149,6 @@ def init_database():
         
         conn.commit()
         
-        # Ajouter données de démonstration si tables vides
-        c.execute("SELECT COUNT(*) FROM clients")
-        if c.fetchone()[0] == 0:
-            # Clients (Client ID 1 et 2)
-            c.execute("""INSERT INTO clients (nom, email, telephone, date_creation) VALUES 
-                        ('Entreprise Alpha', 'contact@alpha.com', '0612345678', CURRENT_DATE),
-                        ('Société Beta', 'info@beta.com', '0698765432', CURRENT_DATE)""")
-            
-            # Produits
-            c.execute("""INSERT INTO produits (nom, prix, stock, seuil_alerte) VALUES 
-                        ('Ordinateur Portable', 899.99, 15, 5),
-                        ('Souris Sans Fil', 29.99, 50, 20),
-                        ('Clavier Mécanique', 79.99, 30, 10)""")
-            
-            # Fournisseurs
-            c.execute("""INSERT INTO fournisseurs (nom, email, telephone, adresse, date_creation) VALUES 
-                        ('TechSupply Co', 'contact@techsupply.com', '0511223344', '12 Rue de la Tech, Paris', CURRENT_DATE),
-                        ('GlobalParts', 'info@globalparts.com', '0522334455', '45 Avenue du Commerce, Lyon', CURRENT_DATE)""")
-            
-            # Commandes (Client 1: Entreprise Alpha, Client 2: Société Beta)
-            c.execute("""INSERT INTO commandes (client_id, produit_id, quantite, date, statut) VALUES 
-                        (1, 1, 2, CURRENT_DATE - INTERVAL '5 days', 'Livrée'),
-                        (2, 2, 5, CURRENT_DATE - INTERVAL '2 days', 'En cours')""")
-            
-            conn.commit()
-            
         # Créer utilisateur admin par défaut si n'existe pas
         c.execute("SELECT COUNT(*) FROM utilisateurs WHERE username = %s", ('admin',))
         if c.fetchone()[0] == 0:
@@ -190,20 +164,30 @@ def init_database():
                           (user_id, module, True, True))
             
             conn.commit()
-            
-        # NOUVEAU: Créer utilisateur client 'alpha' (lié au client 'Entreprise Alpha' par nom)
-        c.execute("SELECT COUNT(*) FROM utilisateurs WHERE username = %s", ('alpha',))
+        
+        # Ajouter données de démonstration si tables vides
+        c.execute("SELECT COUNT(*) FROM clients")
         if c.fetchone()[0] == 0:
-            password_hash = hashlib.sha256("alpha123".encode()).hexdigest()
-            c.execute("INSERT INTO utilisateurs (username, password, role) VALUES (%s, %s, %s) RETURNING id",
-                      ('alpha', password_hash, 'client'))
-            client_user_id = c.fetchone()[0]
+            # Clients
+            c.execute("""INSERT INTO clients (nom, email, telephone, date_creation) VALUES 
+                        ('Entreprise Alpha', 'contact@alpha.com', '0612345678', CURRENT_DATE),
+                        ('Société Beta', 'info@beta.com', '0698765432', CURRENT_DATE)""")
             
-            # Donner droits lecture au client sur les modules pertinents
-            client_modules_lecture = ["tableau_bord", "clients", "produits", "commandes"]
-            for module in client_modules_lecture:
-                c.execute("INSERT INTO permissions (user_id, module, acces_lecture) VALUES (%s, %s, %s)",
-                          (client_user_id, module, True))
+            # Produits
+            c.execute("""INSERT INTO produits (nom, prix, stock, seuil_alerte) VALUES 
+                        ('Ordinateur Portable', 899.99, 15, 5),
+                        ('Souris Sans Fil', 29.99, 50, 20),
+                        ('Clavier Mécanique', 79.99, 30, 10)""")
+            
+            # Fournisseurs
+            c.execute("""INSERT INTO fournisseurs (nom, email, telephone, adresse, date_creation) VALUES 
+                        ('TechSupply Co', 'contact@techsupply.com', '0511223344', '12 Rue de la Tech, Paris', CURRENT_DATE),
+                        ('GlobalParts', 'info@globalparts.com', '0522334455', '45 Avenue du Commerce, Lyon', CURRENT_DATE)""")
+            
+            # Commandes
+            c.execute("""INSERT INTO commandes (client_id, produit_id, quantite, date, statut) VALUES 
+                        (1, 1, 2, CURRENT_DATE - INTERVAL '5 days', 'Livrée'),
+                        (2, 2, 5, CURRENT_DATE - INTERVAL '2 days', 'En cours')""")
             
             conn.commit()
             
@@ -228,27 +212,6 @@ def verify_login(username, password):
     finally:
         release_connection(conn)
 
-# NOUVEAU: Fonction pour mapper un utilisateur client à un client_id
-def get_client_id_by_username(username):
-    """Tente de trouver le client_id correspondant au nom d'utilisateur (pour rôle 'client').
-       NOTE: Ceci est une simplification pour la démo, assumant que le username correspond au nom du client."""
-    conn = get_connection()
-    try:
-        c = conn.cursor()
-        # ASSUMPTION: username of client user matches client name
-        # L'utilisateur 'alpha' est lié au client 'Entreprise Alpha'
-        c.execute("SELECT id FROM clients WHERE nom=%s", (username.title(),)) # Utilise .title() pour 'Alpha' vs 'Entreprise Alpha'
-        result = c.fetchone()
-        
-        # Test 2: Si le nom exact ne marche pas, essaye la recherche par début de nom
-        if result is None:
-            c.execute("SELECT id FROM clients WHERE nom ILIKE %s LIMIT 1", (f'%{username}%',))
-            result = c.fetchone()
-            
-        return result[0] if result else None
-    finally:
-        release_connection(conn)
-
 def get_user_permissions(user_id):
     conn = get_connection()
     try:
@@ -267,6 +230,8 @@ def get_user_permissions(user_id):
 def has_access(module, access_type='lecture'):
     if st.session_state.role == "admin":
         return True
+    permissions = st.session_state.get(module, {'lecture': False, 'ecriture': False})
+    # Correction: st.session_state.get('permissions', {})
     permissions = st.session_state.get('permissions', {})
     module_perms = permissions.get(module, {'lecture': False, 'ecriture': False})
     return module_perms.get(access_type, False)
@@ -281,6 +246,7 @@ def log_access(user_id, module, action):
     finally:
         release_connection(conn)
 
+@st.cache_data(ttl=60)
 def get_clients():
     conn = get_connection()
     try:
@@ -289,6 +255,7 @@ def get_clients():
     finally:
         release_connection(conn)
 
+@st.cache_data(ttl=60)
 def get_produits():
     conn = get_connection()
     try:
@@ -297,6 +264,7 @@ def get_produits():
     finally:
         release_connection(conn)
 
+@st.cache_data(ttl=60)
 def get_fournisseurs():
     conn = get_connection()
     try:
@@ -305,35 +273,24 @@ def get_fournisseurs():
     finally:
         release_connection(conn)
 
-# MODIFIÉ : Ajout du filtrage par client_id
-def get_commandes(client_id=None):
+@st.cache_data(ttl=60)
+def get_commandes():
     conn = get_connection()
     try:
         query = """
         SELECT c.id, cl.nom as client, p.nom as produit, c.quantite, 
-               (c.quantite * p.prix) as montant, c.date, c.statut, c.client_id
+               (c.quantite * p.prix) as montant, c.date, c.statut
         FROM commandes c
         JOIN clients cl ON c.client_id = cl.id
         JOIN produits p ON c.produit_id = p.id
+        ORDER BY c.date DESC
         """
-        params = []
-        if client_id is not None:
-            query += " WHERE c.client_id = %s"
-            params.append(client_id)
-            
-        query += " ORDER BY c.date DESC"
-        
-        # Utilisation du paramètre 'params' pour la sécurité des requêtes
-        df = pd.read_sql_query(query, conn, params=params) 
-        
-        # Supprimer la colonne client_id si elle n'est pas nécessaire pour l'affichage
-        if client_id is not None:
-            df = df.drop(columns=['client_id'], errors='ignore')
-            
+        df = pd.read_sql_query(query, conn)
         return df
     finally:
         release_connection(conn)
 
+@st.cache_data(ttl=60)
 def get_achats():
     conn = get_connection()
     try:
@@ -403,6 +360,106 @@ def delete_session_from_db(session_id):
     finally:
         release_connection(conn)
 
+# ========== FONCTION DE COMMANDE PUBLIQUE (NOUVEAU) ==========
+def page_passer_commande_publique():
+    st.title("🛍️ Passer une Nouvelle Commande (Espace Client)")
+    st.markdown("---")
+    
+    clients = get_clients()
+    produits = get_produits()
+    
+    if produits.empty:
+        st.warning("⚠️ Service temporairement indisponible (aucun produit en vente).")
+        return
+        
+    produits_disponibles = produits[produits['stock'] > 0]
+    
+    if produits_disponibles.empty:
+        st.error("❌ Aucun produit en stock disponible pour la commande actuellement.")
+        return
+
+    with st.form("form_commande_client"):
+        st.subheader("1. Vos Informations")
+        
+        nom_client = st.text_input("Votre Nom/Nom de Société *")
+        email_client = st.text_input("Votre Email *")
+        
+        st.subheader("2. Votre Commande")
+        
+        # Mapping products for selection
+        produits_map = {f"{r['nom']} - {r['prix']:.2f} € (Stock: {r['stock']})": r['id'] for _, r in produits_disponibles.iterrows()}
+        selected_product_label = st.selectbox("Produit *", list(produits_map.keys()))
+        
+        quantite = 0
+        produit_id = None
+        montant_estime = 0.0
+
+        if selected_product_label:
+            produit_id = produits_map[selected_product_label]
+            produit_data = produits_disponibles[produits_disponibles['id'] == produit_id].iloc[0]
+            
+            quantite_max = produit_data['stock']
+            quantite = st.number_input("Quantité *", min_value=1, max_value=int(quantite_max), step=1, value=1)
+
+            montant_estime = produit_data['prix'] * quantite
+            st.info(f"Montant estimé de la commande : **{montant_estime:.2f} €** (hors taxes et livraison)")
+
+        submit = st.form_submit_button("Envoyer la Commande", type="primary", use_container_width=True)
+        
+        if submit:
+            if not nom_client or not email_client or quantite <= 0:
+                st.error("❌ Veuillez remplir tous les champs obligatoires (Nom, Email, Quantité > 0).")
+                return
+
+            conn = get_connection()
+            try:
+                c = conn.cursor()
+                
+                # 1. Check if client exists, otherwise create a new one
+                c.execute("SELECT id FROM clients WHERE email = %s", (email_client,))
+                client_data = c.fetchone()
+                
+                if client_data:
+                    client_id = client_data[0]
+                else:
+                    st.info(f"Client '{nom_client}' non trouvé (email: {email_client}). Création d'un nouveau client.")
+                    c.execute("INSERT INTO clients (nom, email, date_creation) VALUES (%s, %s, CURRENT_DATE) RETURNING id",
+                              (nom_client, email_client))
+                    client_id = c.fetchone()[0]
+                
+                # 2. Final check stock
+                produit_id_py = int(produit_id)
+                quantite_py = int(quantite)
+                client_id_py = int(client_id)
+                
+                c.execute("SELECT stock FROM produits WHERE id = %s", (produit_id_py,))
+                current_stock = c.fetchone()[0]
+                
+                if current_stock >= quantite_py:
+                    
+                    # 3. Insert Command
+                    c.execute("""INSERT INTO commandes (client_id, produit_id, quantite, date, statut) 
+                                VALUES (%s, %s, %s, CURRENT_DATE, 'En attente')""",
+                              (client_id_py, produit_id_py, quantite_py))
+                    
+                    # 4. Update Stock
+                    c.execute("UPDATE produits SET stock = stock - %s WHERE id = %s", (quantite_py, produit_id_py))
+                    
+                    conn.commit()
+                    
+                    st.success(f"✅ Commande envoyée avec succès ! Montant estimé: {montant_estime:.2f} €. Elle est en statut 'En attente' de validation interne.")
+                    st.balloons()
+                else:
+                    conn.rollback()
+                    st.error(f"❌ Erreur: Stock insuffisant ! Disponible: {current_stock}")
+                
+            except Exception as e:
+                conn.rollback()
+                st.error(f"❌ Une erreur est survenue lors de l'enregistrement de la commande: {e}")
+            finally:
+                release_connection(conn)
+
+
 # ========== INITIALISATION ==========
 init_database()
 
@@ -431,7 +488,7 @@ if not st.session_state.logged_in:
             st.session_state.permissions = get_user_permissions(user_id)
             st.session_state.session_id = session_id
 
-# ========== PAGE DE CONNEXION ==========
+# ========== PAGE DE CONNEXION / COMMANDE PUBLIQUE (MODIFIÉ) ==========
 if not st.session_state.logged_in:
     col1, col2, col3 = st.columns([1, 3, 1])
     
@@ -468,41 +525,49 @@ if not st.session_state.logged_in:
         """, unsafe_allow_html=True)
     
     st.markdown("---")
-    st.title("🔐 Authentification Utilisateur")
     
-    col1, col2, col3 = st.columns([1, 2, 1])
-    
-    with col2:
-        with st.form("login_form"):
-            username = st.text_input("Nom d'utilisateur")
-            password = st.text_input("Mot de passe", type="password")
-            submit = st.form_submit_button("Se connecter", use_container_width=True)
-            
-            if submit:
-                result = verify_login(username, password)
-                if result:
-                    user_id, role = result
-                    session_id = save_session_to_db(user_id, username, role)
-                    
-                    st.session_state.logged_in = True
-                    st.session_state.username = username
-                    st.session_state.user_id = user_id
-                    st.session_state.role = role
-                    st.session_state.permissions = get_user_permissions(user_id)
-                    st.session_state.session_id = session_id
-                    
-                    log_access(user_id, "connexion", "Connexion réussie")
-                    st.query_params['session_id'] = session_id
-                    
-                    st.success("✅ Connexion réussie !")
-                    st.info("💡 Votre session est maintenant persistante.")
-                    st.rerun()
-                else:
-                    st.error("❌ Identifiants incorrects")
+    # Nouvelle navigation par onglets pour la connexion interne vs. commande client
+    tab_login, tab_client_order = st.tabs(["🔐 Authentification Utilisateur", "🛍️ Passer une Commande (Client)"])
+
+    with tab_login:
+        st.title("🔐 Authentification Utilisateur")
         
-        st.info("💡 **Comptes par défaut**\nAdmin: `admin` / `admin123`\nClient: `alpha` / `alpha123` (Client Entreprise Alpha)")
-        st.success("🌐 **Mode Multi-Utilisateurs Temps Réel Activé** - Tous les étudiants partagent les mêmes données !")
-    
+        col1, col2, col3 = st.columns([1, 2, 1])
+        
+        with col2:
+            with st.form("login_form"):
+                username = st.text_input("Nom d'utilisateur")
+                password = st.text_input("Mot de passe", type="password")
+                submit = st.form_submit_button("Se connecter", use_container_width=True)
+                
+                if submit:
+                    result = verify_login(username, password)
+                    if result:
+                        user_id, role = result
+                        session_id = save_session_to_db(user_id, username, role)
+                        
+                        st.session_state.logged_in = True
+                        st.session_state.username = username
+                        st.session_state.user_id = user_id
+                        st.session_state.role = role
+                        st.session_state.permissions = get_user_permissions(user_id)
+                        st.session_state.session_id = session_id
+                        
+                        log_access(user_id, "connexion", "Connexion réussie")
+                        st.query_params['session_id'] = session_id
+                        
+                        st.success("✅ Connexion réussie !")
+                        st.info("💡 Votre session est maintenant persistante.")
+                        st.rerun()
+                    else:
+                        st.error("❌ Identifiants incorrects")
+            
+            st.info("💡 **Compte par défaut**\nUsername: admin\nPassword: admin123")
+            st.success("🌐 **Mode Multi-Utilisateurs Temps Réel Activé** - Tous les étudiants partagent les mêmes données !")
+
+    with tab_client_order:
+        page_passer_commande_publique() # Appel à la nouvelle fonction de commande publique
+
     st.stop()
 
 # ========== INTERFACE PRINCIPALE ==========
@@ -602,8 +667,6 @@ if menu == "Tableau de Bord":
     col1, col2, col3, col4 = st.columns(4)
     clients = get_clients()
     produits = get_produits()
-    
-    # MODIFIÉ: Utilisation de get_commandes sans filtre
     commandes = get_commandes()
     
     with col1:
@@ -842,17 +905,7 @@ elif menu == "Gestion des Commandes":
     tab1, tab2 = st.tabs(["Liste", "Créer"])
     
     with tab1:
-        client_filter_id = None
-        # NOUVEAU: Filtrage des commandes pour le rôle client
-        if st.session_state.role == 'client':
-            client_filter_id = get_client_id_by_username(st.session_state.username)
-            if client_filter_id is None:
-                st.warning(f"⚠️ Vos données client n'ont pas été trouvées pour l'utilisateur '{st.session_state.username}'. Accès restreint ou contactez l'administrateur.")
-            else:
-                st.info(f"Filtre actif : Affichage de vos commandes uniquement (Client ID: {client_filter_id})")
-
-        commandes = get_commandes(client_id=client_filter_id)
-        
+        commandes = get_commandes()
         if not commandes.empty:
             st.dataframe(commandes, use_container_width=True, hide_index=True)
             
@@ -880,10 +933,7 @@ elif menu == "Gestion des Commandes":
                         finally:
                             release_connection(conn)
         else:
-            if st.session_state.role == 'client' and client_filter_id is not None:
-                st.info("Vous n'avez pas encore de commande enregistrée.")
-            else:
-                st.info("Aucune commande")
+            st.info("Aucune commande")
     
     with tab2:
         if not has_access("commandes", "ecriture"):
@@ -1195,7 +1245,7 @@ elif menu == "À Propos":
     
     ---
     
-    Version 3.1 - Filtrage des Commandes Client Sécurisé
+    Version 3.0 - Multi-Utilisateurs Temps Réel
     """)
 
 # Footer sidebar
@@ -1204,7 +1254,7 @@ date_footer = datetime.now().strftime('%d/%m/%Y')
 st.sidebar.markdown(f"""
 <div style="background-color: #f8fafc; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0;">
     <p style="margin: 0; font-size: 11px; color: #64748b; text-align: center;">
-        <strong style="color: #1e40af;">SYGEP v3.1</strong><br>
+        <strong style="color: #1e40af;">SYGEP v3.0</strong><br>
         🌐 Mode Temps Réel Activé
     </p>
     <hr style="margin: 10px 0; border: 0; border-top: 1px solid #cbd5e1;">
@@ -1217,16 +1267,17 @@ st.sidebar.markdown(f"""
     <hr style="margin: 10px 0; border: 0; border-top: 1px solid #cbd5e1;">
     <p style="margin: 0; font-size: 10px; color: #64748b; text-align: center;">
         📅 {date_footer}<br>
-        Session: <strong>{st.session_state.username}</strong>
+        Session: <strong>{st.session_state.username if st.session_state.logged_in else 'N/A'}</strong>
     </p>
 </div>
 """, unsafe_allow_html=True)
 
-with st.sidebar.expander("ℹ️ Info Session"):
-    st.write(f"**User ID:** {st.session_state.user_id}")
-    st.write(f"**Rôle:** {st.session_state.role}")
-    if st.session_state.session_id:
-        st.write(f"**Session ID:** {st.session_state.session_id[:8]}...")
-    st.write("**Statut:** 🟢 Connecté")
-    st.write("**Mode:** 🌐 Temps Réel")
-    st.caption("Base de données partagée PostgreSQL/Supabase")
+if st.session_state.logged_in:
+    with st.sidebar.expander("ℹ️ Info Session"):
+        st.write(f"**User ID:** {st.session_state.user_id}")
+        st.write(f"**Rôle:** {st.session_state.role}")
+        if st.session_state.session_id:
+            st.write(f"**Session ID:** {st.session_state.session_id[:8]}...")
+        st.write("**Statut:** 🟢 Connecté")
+        st.write("**Mode:** 🌐 Temps Réel")
+        st.caption("Base de données partagée PostgreSQL/Supabase")
