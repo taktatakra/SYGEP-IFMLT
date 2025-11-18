@@ -502,10 +502,8 @@ if not st.session_state.logged_in:
             st.session_state.permissions = get_user_permissions(user_id)
             st.session_state.session_id = session_id
 
-# ========== PAGE DE CONNEXION / COMMANDE PUBLIQUE (MODIFIÉ) ==========
+# ========== PAGE DE CONNEXION / COMMANDE PUBLIQUE ==========
 if not st.session_state.logged_in:
-    # ... (Le code de la page de connexion n'a pas changé, il est omis ici pour la concision) ...
-    
     col1, col2, col3 = st.columns([1, 3, 1])
     
     with col1:
@@ -736,6 +734,7 @@ elif menu == "Gestion des Clients":
         if not clients.empty:
             st.dataframe(clients, use_container_width=True, hide_index=True)
             
+            # Fonctionnalité de suppression (recherchée par l'utilisateur)
             if has_access("clients", "ecriture"):
                 col1, col2 = st.columns([3, 1])
                 with col1:
@@ -802,6 +801,7 @@ elif menu == "Gestion des Produits":
                 lambda r: '🔴' if r['stock'] <= r['seuil_alerte'] else '🟢', axis=1)
             st.dataframe(produits, use_container_width=True, hide_index=True)
             
+            # Fonctionnalité de mise à jour / Ajustement de Stock (recherchée par l'utilisateur)
             if has_access("produits", "ecriture"):
                 st.divider()
                 st.subheader("📝 Ajuster Stock")
@@ -856,7 +856,7 @@ elif menu == "Gestion des Produits":
                     else:
                         st.error("Nom et prix > 0 requis")
 
-# ========== GESTION DES FOURNISSEURS (SECTION AJOUTÉE/COMPLÉTÉE) ==========
+# ========== GESTION DES FOURNISSEURS ==========
 elif menu == "Gestion des Fournisseurs":
     if not has_access("fournisseurs"):
         st.error("❌ Accès refusé")
@@ -872,6 +872,7 @@ elif menu == "Gestion des Fournisseurs":
         if not fournisseurs.empty:
             st.dataframe(fournisseurs, use_container_width=True, hide_index=True)
 
+            # Fonctionnalité de suppression (recherchée par l'utilisateur)
             if has_access("fournisseurs", "ecriture"):
                 col1, col2 = st.columns([3, 1])
                 with col1:
@@ -937,6 +938,7 @@ elif menu == "Gestion des Commandes":
         if not commandes.empty:
             st.dataframe(commandes, use_container_width=True, hide_index=True)
             
+            # Fonctionnalité de changement de statut (Mise à jour) (recherchée par l'utilisateur)
             if has_access("commandes", "ecriture"):
                 st.divider()
                 st.subheader("📝 Changer Statut")
@@ -958,7 +960,7 @@ elif menu == "Gestion des Commandes":
                             log_access(st.session_state.user_id, "commandes", f"MAJ statut ID:{cmd_id}")
                             st.success(f"Statut: {statut}")
                             
-                            # NOUVEAU: Si le statut "En attente" est retiré, actualiser le compteur de notif.
+                            # Invalider le cache si le statut En attente est changé
                             if statut != 'En attente':
                                 get_pending_orders_count.clear()
                                 
@@ -1013,7 +1015,7 @@ elif menu == "Gestion des Commandes":
                         else:
                             st.error(f"❌ Stock insuffisant ! Dispo: {produit['stock']}")
 
-# ========== GESTION DES ACHATS (SECTION AJOUTÉE/CORRIGÉE) ==========
+# ========== GESTION DES ACHATS ==========
 elif menu == "Gestion des Achats":
     if not has_access("achats"):
         st.error("❌ Accès refusé")
@@ -1029,6 +1031,7 @@ elif menu == "Gestion des Achats":
         if not achats.empty:
             st.dataframe(achats, use_container_width=True, hide_index=True)
             
+            # Fonctionnalité de validation de réception (recherchée par l'utilisateur)
             if has_access("achats", "ecriture"):
                 st.divider()
                 st.subheader("📝 Valider Réception")
@@ -1070,7 +1073,7 @@ elif menu == "Gestion des Achats":
                                 st.error("❌ Achat non trouvé.")
                                 
                         except Exception as e:
-                            st.error(f"❌ Erreur lors de la mise à jour: {e}") # Ceci est l'erreur que vous aviez (numpy.int64)
+                            st.error(f"❌ Erreur lors de la mise à jour: {e}")
                             conn.rollback()
                         finally:
                             release_connection(conn)
@@ -1136,6 +1139,7 @@ elif menu == "Gestion des Utilisateurs":
             users = pd.read_sql_query("SELECT id, username, role, date_creation FROM utilisateurs ORDER BY id", conn)
             st.dataframe(users, use_container_width=True, hide_index=True)
             
+            # Fonctionnalité de suppression (recherchée par l'utilisateur)
             st.divider()
             col1, col2 = st.columns([3, 1])
             with col1:
@@ -1186,6 +1190,7 @@ elif menu == "Gestion des Utilisateurs":
                 new_perms[mod] = {'lecture': lec, 'ecriture': ecr}
                 st.divider()
             
+            # Fonctionnalité de mise à jour des permissions (recherchée par l'utilisateur)
             if st.button("💾 Enregistrer Permissions", type="primary", use_container_width=True):
                 # 💡 FIX: Conversion explicite en int pour user_sel
                 user_sel_py = int(user_sel)
