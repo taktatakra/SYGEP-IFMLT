@@ -620,47 +620,70 @@ if st.session_state.role != "admin":
             ecriture = "✏️" if perms['ecriture'] else ""
             st.write(f"{icon} **{module.replace('_', ' ').title()}** {lecture} {ecriture}")
 
-# Début du bloc de déconnexion corrigé
 if st.sidebar.button("🚪 Se déconnecter", use_container_width=True):
     log_access(st.session_state.user_id, "deconnexion", "Déconnexion")
-    
-    # 1. Suppression de la session DB
     if st.session_state.session_id:
         delete_session_from_db(st.session_state.session_id)
-        
-    # 2. Nettoyage de l'état de session (On ne supprime que les clés qui ne sont PAS les clés de base de session_state)
     st.query_params.clear()
-    keys_to_keep = ['logged_in', 'username', 'user_id', 'role', 'permissions', 'session_id', 'current_menu'] 
-    keys_to_delete = [key for key in list(st.session_state.keys()) if key not in keys_to_keep]
-    for key in keys_to_delete:
+    for key in list(st.session_state.keys()):
         del st.session_state[key]
-
-    # 3. Réinitialisation de l'état de connexion
-    st.session_state.logged_in = False
-    st.session_state.username = None
-    st.session_state.user_id = None
-    st.session_state.role = None
-    st.session_state.session_id = None
-
-    # 4. Forcer le re-run et l'arrêt de l'exécution
     st.rerun()
-    st.stop() # <-- AJOUT CRUCIAL : Arrête l'exécution ici pour ne pas continuer sur l'interface principale après le re-run.
-# Fin du bloc de déconnexion corrigé
 
 st.sidebar.divider()
 
-menu_items = []
-if has_access("tableau_bord"): menu_items.append("Tableau de Bord")
-if has_access("clients"): menu_items.append("Gestion des Clients")
-if has_access("produits"): menu_items.append("Gestion des Produits")
-if has_access("fournisseurs"): menu_items.append("Gestion des Fournisseurs")
-if has_access("commandes"): menu_items.append("Gestion des Commandes")
-if has_access("achats"): menu_items.append("Gestion des Achats")
-if has_access("rapports"): menu_items.append("Rapports & Exports")
-if has_access("utilisateurs"): menu_items.append("Gestion des Utilisateurs")
-menu_items.append("À Propos")
+# ========== MENU NAVIGATION AMÉLIORÉ AVEC BOUTONS RADIO ET EMOJIS ==========
+st.sidebar.markdown("### 🧭 Navigation")
 
-menu = st.sidebar.selectbox("🧭 Navigation", menu_items)
+# Initialiser le menu sélectionné dans session_state si nécessaire
+if 'selected_menu' not in st.session_state:
+    st.session_state.selected_menu = "Tableau de Bord"
+
+# Construction des options de menu avec emojis
+menu_options = []
+menu_icons = {
+    "Tableau de Bord": "📈",
+    "Gestion des Clients": "👥",
+    "Gestion des Produits": "📦",
+    "Gestion des Fournisseurs": "🚚",
+    "Gestion des Commandes": "🛒",
+    "Gestion des Achats": "🛍️",
+    "Rapports & Exports": "📊",
+    "Gestion des Utilisateurs": "👤",
+    "À Propos": "ℹ️"
+}
+
+if has_access("tableau_bord"): 
+    menu_options.append("Tableau de Bord")
+if has_access("clients"): 
+    menu_options.append("Gestion des Clients")
+if has_access("produits"): 
+    menu_options.append("Gestion des Produits")
+if has_access("fournisseurs"): 
+    menu_options.append("Gestion des Fournisseurs")
+if has_access("commandes"): 
+    menu_options.append("Gestion des Commandes")
+if has_access("achats"): 
+    menu_options.append("Gestion des Achats")
+if has_access("rapports"): 
+    menu_options.append("Rapports & Exports")
+if has_access("utilisateurs"): 
+    menu_options.append("Gestion des Utilisateurs")
+menu_options.append("À Propos")
+
+# Créer les labels avec emojis pour le radio
+menu_labels = [f"{menu_icons[opt]} {opt}" for opt in menu_options]
+
+# Menu avec boutons radio
+selected_label = st.sidebar.radio(
+    "Sélectionnez un module",
+    menu_labels,
+    index=menu_options.index(st.session_state.selected_menu) if st.session_state.selected_menu in menu_options else 0,
+    label_visibility="collapsed"
+)
+
+# Extraire le nom du menu sans l'emoji
+menu = selected_label.split(" ", 1)[1]
+st.session_state.selected_menu = menu
 
 # ========== TABLEAU DE BORD ==========
 if menu == "Tableau de Bord":
@@ -738,7 +761,6 @@ elif menu == "Gestion des Clients":
                         try:
                             c = conn.cursor()
                             
-                            # Vérifier si le client a des commandes
                             c.execute("SELECT COUNT(*) FROM commandes WHERE client_id=%s", (int(client_id),))
                             nb_commandes = c.fetchone()[0]
                             
@@ -912,7 +934,6 @@ elif menu == "Gestion des Produits":
                             try:
                                 c = conn.cursor()
                                 
-                                # Vérifier si le produit est utilisé dans des commandes ou achats
                                 c.execute("SELECT COUNT(*) FROM commandes WHERE produit_id=%s", (int(prod_del_id),))
                                 nb_commandes = c.fetchone()[0]
                                 
@@ -1072,7 +1093,6 @@ elif menu == "Gestion des Fournisseurs":
                         try:
                             c = conn.cursor()
                             
-                            # Vérifier si le fournisseur a des achats
                             c.execute("SELECT COUNT(*) FROM achats WHERE fournisseur_id=%s", (int(fournisseur_id),))
                             nb_achats = c.fetchone()[0]
                             
@@ -1184,10 +1204,7 @@ elif menu == "Gestion des Fournisseurs":
                                     st.error(f"❌ Erreur: {e}")
                                 finally:
                                     release_connection(conn)
-                            else:
-                                st.error("❌ Le nom est obligatoire")
-
-# ========== GESTION DES COMMANDES (À COMPLÉTER) ==========
+# ========== GESTION DES COMMANDES ==========
 elif menu == "Gestion des Commandes":
     if not has_access("commandes"):
         st.error("❌ Accès refusé")
@@ -1196,437 +1213,598 @@ elif menu == "Gestion des Commandes":
     log_access(st.session_state.user_id, "commandes", "Consultation")
     st.header("🛒 Gestion des Commandes")
     
-    tab1, tab2, tab3 = st.tabs(["📋 Liste", "➕ Nouvelle Commande Interne", "⚙️ Validation"])
-    
-    commandes = get_commandes()
+    tab1, tab2 = st.tabs(["📋 Liste", "➕ Créer"])
     
     with tab1:
+        commandes = get_commandes()
         if not commandes.empty:
             st.dataframe(commandes, use_container_width=True, hide_index=True)
+            
+            if has_access("commandes", "ecriture"):
+                st.divider()
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.subheader("📝 Changer Statut")
+                    col_a, col_b, col_c = st.columns(3)
+                    with col_a:
+                        cmd_id = st.selectbox("Commande N°", commandes['id'].tolist())
+                    with col_b:
+                        statut = st.selectbox("Statut", ["En attente", "En cours", "Livrée", "Annulée"])
+                    with col_c:
+                        st.write("")
+                        st.write("")
+                        if st.button("✅ Mettre à jour"):
+                            conn = get_connection()
+                            try:
+                                c = conn.cursor()
+                                c.execute("UPDATE commandes SET statut = %s WHERE id = %s", (statut, int(cmd_id)))
+                                conn.commit()
+                                log_access(st.session_state.user_id, "commandes", f"MAJ statut ID:{cmd_id}")
+                                st.success(f"Statut: {statut}")
+                                
+                                if statut != 'En attente':
+                                    get_pending_orders_count.clear()
+                                    
+                                get_commandes.clear()
+                                st.rerun()
+                            except Exception as e:
+                                conn.rollback()
+                                st.error(f"❌ Erreur: {e}")
+                            finally:
+                                release_connection(conn)
+                
+                with col2:
+                    st.subheader("🗑️ Supprimer une Commande")
+                    col_x, col_y = st.columns([3, 1])
+                    with col_x:
+                        cmd_del_id = st.selectbox("Commande à supprimer", commandes['id'].tolist(),
+                                                 format_func=lambda x: f"Commande #{x}")
+                    with col_y:
+                        st.write("")
+                        st.write("")
+                        if st.button("🗑️ Supprimer", type="secondary", key="del_cmd"):
+                            conn = get_connection()
+                            try:
+                                c = conn.cursor()
+                                c.execute("DELETE FROM commandes WHERE id=%s", (int(cmd_del_id),))
+                                conn.commit()
+                                log_access(st.session_state.user_id, "commandes", f"Suppression ID:{cmd_del_id}")
+                                st.success("✅ Commande supprimée!")
+                                get_commandes.clear()
+                                get_pending_orders_count.clear()
+                                st.rerun()
+                            except Exception as e:
+                                conn.rollback()
+                                st.error(f"❌ Erreur: {e}")
+                            finally:
+                                release_connection(conn)
         else:
-            st.info("📭 Aucune commande enregistrée")
+            st.info("📭 Aucune commande")
     
     with tab2:
-        st.info("Fonctionnalité à implémenter pour les commandes passées en interne.")
-    
-    with tab3:
         if not has_access("commandes", "ecriture"):
-            st.warning("⚠️ Vous n'avez pas les droits d'écriture")
+            st.warning("⚠️ Pas de droits d'écriture")
         else:
-            st.subheader("⚙️ Validation des Commandes en Attente")
-            commandes_en_attente = commandes[commandes['statut'] == 'En attente']
+            st.subheader("➕ Créer une Nouvelle Commande")
+            clients = get_clients()
+            produits = get_produits()
             
-            if commandes_en_attente.empty:
-                st.success("✅ Aucune commande en attente de validation.")
+            if clients.empty or produits.empty:
+                st.warning("⚠️ Il faut au moins 1 client et 1 produit")
             else:
-                st.warning(f"🔔 {len(commandes_en_attente)} commande(s) à valider.")
-                
-                # Récupérer la liste des ID pour le selectbox
-                commandes_map = {f"ID {r['id']} - Client: {r['client']} - Montant: {r['montant']:.2f} €": r['id'] for _, r in commandes_en_attente.iterrows()}
-                
-                selected_command_label = st.selectbox("Sélectionner la commande à traiter", list(commandes_map.keys()))
-                
-                if selected_command_label:
-                    command_id = commandes_map[selected_command_label]
-                    command_data = commandes_en_attente[commandes_en_attente['id'] == command_id].iloc[0]
+                with st.form("form_commande"):
+                    client_id = st.selectbox("Client *", clients['id'].tolist(),
+                                            format_func=lambda x: clients[clients['id']==x]['nom'].iloc[0])
+                    produit_id = st.selectbox("Produit *", produits['id'].tolist(),
+                                             format_func=lambda x: f"{produits[produits['id']==x]['nom'].iloc[0]} - {produits[produits['id']==x]['prix'].iloc[0]:.2f} €")
+                    quantite = st.number_input("Quantité *", min_value=1, step=1, value=1)
                     
-                    st.markdown("---")
-                    st.write(f"**Commande sélectionnée (ID {command_id})**")
-                    st.dataframe(pd.DataFrame([command_data]), use_container_width=True, hide_index=True)
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        submit = st.form_submit_button("✅ Créer", use_container_width=True, type="primary")
+                    with col2:
+                        cancel = st.form_submit_button("❌ Annuler", use_container_width=True)
                     
-                    new_statut = st.radio("Nouveau Statut", ['Livrée', 'Annulée', 'En cours'], index=1)
-                    
-                    if st.button(f"✅ Mettre à jour le statut à '{new_statut}'", type="primary", use_container_width=True):
-                        conn = get_connection()
-                        try:
-                            c = conn.cursor()
-                            c.execute("UPDATE commandes SET statut=%s WHERE id=%s", (new_statut, int(command_id)))
-                            conn.commit()
-                            
-                            # Si la commande est annulée, le stock doit être remis
-                            if new_statut == 'Annulée':
-                                c.execute("SELECT produit_id, quantite FROM commandes WHERE id=%s", (int(command_id),))
-                                prod_id, quantite = c.fetchone()
-                                c.execute("UPDATE produits SET stock = stock + %s WHERE id = %s", (quantite, prod_id))
+                    if submit:
+                        produit = produits[produits['id'] == produit_id].iloc[0]
+                        if produit['stock'] >= quantite:
+                            conn = get_connection()
+                            try:
+                                c = conn.cursor()
+                                client_id_py = int(client_id)
+                                produit_id_py = int(produit_id)
+                                quantite_py = int(quantite)
+                                
+                                c.execute("""INSERT INTO commandes (client_id, produit_id, quantite, date, statut) 
+                                            VALUES (%s, %s, %s, CURRENT_DATE, 'En cours')""",
+                                          (client_id_py, produit_id_py, quantite_py))
+                                c.execute("UPDATE produits SET stock = stock - %s WHERE id = %s", (quantite_py, produit_id_py))
                                 conn.commit()
-                                log_access(st.session_state.user_id, "commandes", f"Annulation ID:{command_id} - Stock Reajusté")
-                            else:
-                                log_access(st.session_state.user_id, "commandes", f"Validation ID:{command_id} -> {new_statut}")
+                                montant = produit['prix'] * quantite
+                                log_access(st.session_state.user_id, "commandes", f"Création: {montant:.2f}€")
+                                st.success(f"✅ Commande créée ! Montant: {montant:.2f} €")
+                                get_commandes.clear()
+                                get_produits.clear()
+                                st.rerun()
+                            except Exception as e:
+                                conn.rollback()
+                                st.error(f"❌ Erreur: {e}")
+                            finally:
+                                release_connection(conn)
+                        else:
+                            st.error(f"❌ Stock insuffisant ! Dispo: {produit['stock']}")
 
-                            st.success(f"✅ Statut de la commande ID {command_id} mis à jour à **{new_statut}**!")
-                            get_commandes.clear()
-                            get_pending_orders_count.clear()
-                            get_produits.clear()
-                            st.rerun()
-                        except Exception as e:
-                            conn.rollback()
-                            st.error(f"❌ Erreur: {e}")
-                        finally:
-                            release_connection(conn)
-
-# ========== GESTION DES ACHATS (À COMPLÉTER) ==========
+# ========== GESTION DES ACHATS ==========
 elif menu == "Gestion des Achats":
     if not has_access("achats"):
         st.error("❌ Accès refusé")
         st.stop()
     
     log_access(st.session_state.user_id, "achats", "Consultation")
-    st.header("🛒 Gestion des Achats (Fournisseurs)")
+    st.header("🛍️ Gestion des Achats")
     
-    tab1, tab2 = st.tabs(["📋 Liste", "➕ Nouvel Achat"])
-    
-    achats = get_achats()
+    tab1, tab2 = st.tabs(["📋 Liste", "➕ Créer"])
     
     with tab1:
+        achats = get_achats()
         if not achats.empty:
             st.dataframe(achats, use_container_width=True, hide_index=True)
             
             if has_access("achats", "ecriture"):
                 st.divider()
-                st.subheader("🗑️ Supprimer un Achat")
-                col1, col2 = st.columns([3, 1])
+                col1, col2 = st.columns(2)
+                
                 with col1:
-                    achat_id = st.selectbox("Sélectionner l'achat à supprimer", achats['id'].tolist(),
-                                            format_func=lambda x: f"ID {x} - Fournisseur: {achats[achats['id']==x]['fournisseur'].iloc[0]} - Montant: {achats[achats['id']==x]['montant_total'].iloc[0]:.2f} €")
+                    st.subheader("📝 Valider Réception")
+                    col_a, col_b = st.columns([3, 1])
+                    with col_a:
+                        achat_id = st.selectbox("Achat N°", achats['id'].tolist())
+                    with col_b:
+                        st.write("")
+                        st.write("")
+                        if st.button("✅ Valider"):
+                            conn = get_connection()
+                            try:
+                                c = conn.cursor()
+                                
+                                c.execute("SELECT produit_id, quantite, statut FROM achats WHERE id = %s", (int(achat_id),)) 
+                                achat_data = c.fetchone()
+                                
+                                if achat_data and achat_data[2] != 'Reçue':
+                                    produit_id, quantite, _ = achat_data
+                                    
+                                    c.execute("UPDATE achats SET statut = 'Reçue' WHERE id = %s", (int(achat_id),))
+                                    c.execute("UPDATE produits SET stock = stock + %s WHERE id = %s", (int(quantite), int(produit_id)))
+                                    
+                                    conn.commit()
+                                    log_access(st.session_state.user_id, "achats", f"Réception validée ID:{achat_id}")
+                                    st.success("✅ Réception validée et stock mis à jour.")
+                                    get_achats.clear()
+                                    get_produits.clear()
+                                    st.rerun()
+                                elif achat_data and achat_data[2] == 'Reçue':
+                                    st.warning("⚠️ Cet achat est déjà marqué comme reçu.")
+                                else:
+                                    st.error("❌ Achat non trouvé.")
+                                    
+                            except Exception as e:
+                                st.error(f"❌ Erreur: {e}")
+                                conn.rollback()
+                            finally:
+                                release_connection(conn)
+                
                 with col2:
-                    st.write("")
-                    st.write("")
-                    if st.button("🗑️ Supprimer l'Achat", type="secondary"):
-                        conn = get_connection()
-                        try:
-                            c = conn.cursor()
-                            
-                            # Récupérer les données d'achat pour réajuster le stock si nécessaire
-                            c.execute("SELECT produit_id, quantite, statut FROM achats WHERE id=%s", (int(achat_id),))
-                            prod_id, quantite, statut = c.fetchone()
-
-                            c.execute("DELETE FROM achats WHERE id=%s", (int(achat_id),))
-                            conn.commit()
-
-                            # Si l'achat avait été validé (stock ajouté), il faut le retirer
-                            if statut == 'Validé':
-                                c.execute("UPDATE produits SET stock = stock - %s WHERE id = %s", (quantite, prod_id))
+                    st.subheader("🗑️ Supprimer un Achat")
+                    col_x, col_y = st.columns([3, 1])
+                    with col_x:
+                        achat_del_id = st.selectbox("Achat à supprimer", achats['id'].tolist(),
+                                                   format_func=lambda x: f"Achat #{x}", key="del_select")
+                    with col_y:
+                        st.write("")
+                        st.write("")
+                        if st.button("🗑️ Supprimer", type="secondary", key="del_achat"):
+                            conn = get_connection()
+                            try:
+                                c = conn.cursor()
+                                c.execute("DELETE FROM achats WHERE id=%s", (int(achat_del_id),))
                                 conn.commit()
-                                log_access(st.session_state.user_id, "achats", f"Suppression ID:{achat_id} - Stock Reajusté")
-                            else:
-                                log_access(st.session_state.user_id, "achats", f"Suppression ID:{achat_id}")
-                            
-                            st.success("✅ Achat supprimé avec succès!")
-                            get_achats.clear()
-                            get_produits.clear()
-                            st.rerun()
-                        except Exception as e:
-                            conn.rollback()
-                            st.error(f"❌ Erreur technique: {e}")
-                        finally:
-                            release_connection(conn)
+                                log_access(st.session_state.user_id, "achats", f"Suppression ID:{achat_del_id}")
+                                st.success("✅ Achat supprimé!")
+                                get_achats.clear()
+                                st.rerun()
+                            except Exception as e:
+                                conn.rollback()
+                                st.error(f"❌ Erreur: {e}")
+                            finally:
+                                release_connection(conn)
         else:
-            st.info("📭 Aucun achat enregistré")
-
+            st.info("📭 Aucun achat")
+    
     with tab2:
         if not has_access("achats", "ecriture"):
-            st.warning("⚠️ Vous n'avez pas les droits d'écriture")
+            st.warning("⚠️ Pas de droits d'écriture")
         else:
-            st.subheader("➕ Enregistrer un Nouvel Achat")
-            
+            st.subheader("➕ Créer un Nouvel Achat")
             fournisseurs = get_fournisseurs()
             produits = get_produits()
             
             if fournisseurs.empty or produits.empty:
-                st.error("❌ Veuillez ajouter des fournisseurs et des produits avant d'enregistrer un achat.")
-                st.stop()
-                
-            fournisseurs_map = {r['nom']: r['id'] for _, r in fournisseurs.iterrows()}
-            produits_map = {r['nom']: r['id'] for _, r in produits.iterrows()}
-            
-            with st.form("form_add_achat"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    fournisseur_nom = st.selectbox("Fournisseur *", list(fournisseurs_map.keys()))
-                with col2:
-                    produit_nom = st.selectbox("Produit *", list(produits_map.keys()))
-                    
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    quantite = st.number_input("Quantité Achetée *", min_value=1, step=1, value=1)
-                with col_b:
-                    prix_unitaire = st.number_input("Prix Unitaire d'Achat (€) *", min_value=0.01, step=0.01, format="%.2f")
-                
-                date_achat = st.date_input("Date de l'Achat", value=datetime.now())
-                statut = st.selectbox("Statut", ['En cours', 'Validé', 'Annulé'])
-
-                submit = st.form_submit_button("✅ Enregistrer l'Achat", type="primary", use_container_width=True)
-                
-                if submit:
-                    if quantite > 0 and prix_unitaire > 0:
-                        fournisseur_id = fournisseurs_map[fournisseur_nom]
-                        produit_id = produits_map[produit_nom]
-                        
-                        conn = get_connection()
-                        try:
-                            c = conn.cursor()
-                            
-                            c.execute("""INSERT INTO achats (fournisseur_id, produit_id, quantite, prix_unitaire, date, statut) 
-                                        VALUES (%s, %s, %s, %s, %s, %s)""",
-                                      (fournisseur_id, produit_id, int(quantite), float(prix_unitaire), date_achat, statut))
-                            
-                            # Mettre à jour le stock si l'achat est 'Validé'
-                            if statut == 'Validé':
-                                c.execute("UPDATE produits SET stock = stock + %s WHERE id = %s", (int(quantite), produit_id))
-                            
-                            conn.commit()
-                            log_access(st.session_state.user_id, "achats", f"Ajout: {produit_nom} x {quantite} pour {fournisseur_nom} (Statut: {statut})")
-                            st.success(f"✅ Achat enregistré avec succès (Statut: {statut})!")
-                            get_achats.clear()
-                            get_produits.clear()
-                            st.rerun()
-                            
-                        except Exception as e:
-                            conn.rollback()
-                            st.error(f"❌ Erreur: {e}")
-                        finally:
-                            release_connection(conn)
-                    else:
-                        st.error("❌ La quantité et le prix unitaire doivent être supérieurs à 0.")
-
-# ========== GESTION DES UTILISATEURS (ADMIN SEUL) ==========
-elif menu == "Gestion des Utilisateurs":
-    if st.session_state.role != "admin":
-        st.error("❌ Accès refusé. Seul un administrateur peut gérer les utilisateurs.")
-        st.stop()
-        
-    log_access(st.session_state.user_id, "utilisateurs", "Consultation")
-    st.header("🧑‍💻 Gestion des Utilisateurs")
-    
-    conn = get_connection()
-    try:
-        utilisateurs = pd.read_sql_query("SELECT id, username, role, date_creation FROM utilisateurs ORDER BY id", conn)
-    finally:
-        release_connection(conn)
-        
-    tab1, tab2, tab3 = st.tabs(["📋 Liste des Utilisateurs", "➕ Ajouter un Utilisateur", "🔑 Gérer les Permissions"])
-    
-    with tab1:
-        st.subheader("Liste des Comptes")
-        st.dataframe(utilisateurs, use_container_width=True, hide_index=True)
-        
-        st.divider()
-        st.subheader("🗑️ Supprimer un Utilisateur")
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            users_to_del = utilisateurs[utilisateurs['username'] != 'admin'] # Empêcher la suppression de l'admin
-            if users_to_del.empty:
-                 st.info("Aucun autre utilisateur à supprimer.")
-                 user_id_del = None
+                st.warning("⚠️ Il faut au moins 1 fournisseur et 1 produit")
             else:
-                user_id_del = st.selectbox("Sélectionner l'utilisateur à supprimer", users_to_del['id'].tolist(),
-                                            format_func=lambda x: f"{users_to_del[users_to_del['id']==x]['username'].iloc[0]} ({users_to_del[users_to_del['id']==x]['role'].iloc[0]})")
-        with col2:
-            st.write("")
-            st.write("")
-            if user_id_del and st.button("🗑️ Supprimer le Compte", type="secondary"):
-                conn = get_connection()
-                try:
-                    c = conn.cursor()
-                    c.execute("DELETE FROM utilisateurs WHERE id=%s", (int(user_id_del),))
-                    conn.commit()
-                    log_access(st.session_state.user_id, "utilisateurs", f"Suppression utilisateur ID:{user_id_del}")
-                    st.success("✅ Utilisateur supprimé avec succès!")
-                    st.rerun()
-                except Exception as e:
-                    conn.rollback()
-                    st.error(f"❌ Erreur: {e}")
-                finally:
-                    release_connection(conn)
-
-    with tab2:
-        st.subheader("➕ Créer un Nouveau Compte")
-        with st.form("form_add_user"):
-            username = st.text_input("Nom d'utilisateur *")
-            password = st.text_input("Mot de passe *", type="password")
-            role = st.selectbox("Rôle", ['employe', 'manager', 'admin'], index=0)
-            
-            submit = st.form_submit_button("✅ Créer le Compte", type="primary", use_container_width=True)
-            
-            if submit:
-                if username and password:
-                    conn = get_connection()
-                    try:
-                        c = conn.cursor()
-                        password_hash = hash_password(password)
-                        
-                        c.execute("INSERT INTO utilisateurs (username, password, role) VALUES (%s, %s, %s) RETURNING id",
-                                  (username, password_hash, role))
-                        new_user_id = c.fetchone()[0]
-                        
-                        # Permissions par défaut (lecture seule pour les employés)
-                        modules = ["tableau_bord", "clients", "produits", "fournisseurs", "commandes", "achats", "rapports"]
-                        for module in modules:
-                            lecture = True if role in ['employe', 'manager', 'admin'] else False
-                            ecriture = True if role in ['manager', 'admin'] else False
-                            if module == "utilisateurs" and role != 'admin':
-                                lecture, ecriture = False, False
-                            
-                            c.execute("INSERT INTO permissions (user_id, module, acces_lecture, acces_ecriture) VALUES (%s, %s, %s, %s)",
-                                      (new_user_id, module, lecture, ecriture))
-                        
-                        conn.commit()
-                        log_access(st.session_state.user_id, "utilisateurs", f"Création compte: {username} ({role})")
-                        st.success(f"✅ Utilisateur '{username}' créé avec succès (Rôle: {role})!")
-                        st.balloons()
-                        st.rerun()
-                    except psycopg2.errors.UniqueViolation:
-                        conn.rollback()
-                        st.error("❌ Erreur: Ce nom d'utilisateur existe déjà.")
-                    except Exception as e:
-                        conn.rollback()
-                        st.error(f"❌ Erreur technique: {e}")
-                    finally:
-                        release_connection(conn)
-                else:
-                    st.error("❌ Le nom d'utilisateur et le mot de passe sont obligatoires.")
-
-    with tab3:
-        st.subheader("🔑 Modifier les Permissions")
-        
-        users_perms = utilisateurs[utilisateurs['username'] != 'admin'] # Ne pas modifier les permissions de l'admin
-        if users_perms.empty:
-            st.info("Aucun autre utilisateur pour modifier les permissions.")
-            st.stop()
-            
-        user_id_perm = st.selectbox("Sélectionner l'utilisateur", users_perms['id'].tolist(),
-                                    format_func=lambda x: f"{users_perms[users_perms['id']==x]['username'].iloc[0]} ({users_perms[users_perms['id']==x]['role'].iloc[0]})")
-
-        if user_id_perm:
-            current_perms = get_user_permissions(user_id_perm)
-            
-            with st.form("form_update_perms"):
-                st.markdown("### Permissions par Module")
-                
-                modules = ["tableau_bord", "clients", "produits", "fournisseurs", "commandes", "achats", "rapports", "utilisateurs"]
-                
-                new_perms = {}
-                
-                for module in modules:
-                    st.markdown(f"**{module.replace('_', ' ').title()}**")
+                with st.form("form_achat"):
+                    fournisseur_id = st.selectbox("Fournisseur *", fournisseurs['id'].tolist(),
+                                            format_func=lambda x: fournisseurs[fournisseurs['id']==x]['nom'].iloc[0])
+                    produit_id = st.selectbox("Produit *", produits['id'].tolist(),
+                                            format_func=lambda x: produits[produits['id']==x]['nom'].iloc[0])
+                    quantite = st.number_input("Quantité *", min_value=1, step=1, value=1)
+                    prix_unitaire = st.number_input("Prix Unitaire (€) *", min_value=0.01, step=0.01, format="%.2f")
+                    
                     col1, col2 = st.columns(2)
-                    
                     with col1:
-                        default_lecture = current_perms.get(module, {}).get('lecture', False)
-                        lecture = st.checkbox("Accès en Lecture", value=default_lecture, key=f"read_{module}")
-                        
+                        submit = st.form_submit_button("✅ Créer l'Achat", use_container_width=True, type="primary")
                     with col2:
-                        default_ecriture = current_perms.get(module, {}).get('ecriture', False)
-                        # Empêcher la modification de l'utilisateur si ce n'est pas un admin, même si le module est 'utilisateurs'
-                        disabled_ecriture = (module == "utilisateurs" and users_perms[users_perms['id'] == user_id_perm]['role'].iloc[0] != 'admin')
-                        
-                        ecriture = st.checkbox("Accès en Écriture", value=default_ecriture, key=f"write_{module}", disabled=disabled_ecriture)
+                        cancel = st.form_submit_button("❌ Annuler", use_container_width=True)
                     
-                    new_perms[module] = {'lecture': lecture, 'ecriture': ecriture}
+                    if submit:
+                        if quantite > 0 and prix_unitaire > 0:
+                            conn = get_connection()
+                            try:
+                                c = conn.cursor()
+                                fournisseur_id_py = int(fournisseur_id)
+                                produit_id_py = int(produit_id)
+                                quantite_py = int(quantite)
+                                prix_unitaire_py = float(prix_unitaire)
+                                
+                                c.execute("""INSERT INTO achats (fournisseur_id, produit_id, quantite, prix_unitaire, date, statut) 
+                                            VALUES (%s, %s, %s, %s, CURRENT_DATE, 'En attente')""",
+                                          (fournisseur_id_py, produit_id_py, quantite_py, prix_unitaire_py))
+                                conn.commit()
+                                log_access(st.session_state.user_id, "achats", f"Création: {quantite_py} x {prix_unitaire_py}€")
+                                st.success(f"✅ Commande d'achat créée !")
+                                get_achats.clear()
+                                st.rerun()
+                            except Exception as e:
+                                conn.rollback()
+                                st.error(f"❌ Erreur: {e}")
+                            finally:
+                                release_connection(conn)
+                        else:
+                            st.error("❌ Quantité et Prix Unitaire requis")
 
-                st.divider()
-                submit_perms = st.form_submit_button("✅ Mettre à Jour les Permissions", type="primary", use_container_width=True)
-                
-                if submit_perms:
-                    conn = get_connection()
-                    try:
-                        c = conn.cursor()
-                        for module, perms in new_perms.items():
-                            c.execute("""INSERT INTO permissions (user_id, module, acces_lecture, acces_ecriture) 
-                                         VALUES (%s, %s, %s, %s)
-                                         ON CONFLICT (user_id, module) DO UPDATE SET 
-                                         acces_lecture = EXCLUDED.acces_lecture, 
-                                         acces_ecriture = EXCLUDED.acces_ecriture""",
-                                      (int(user_id_perm), module, perms['lecture'], perms['ecriture']))
-                        
-                        conn.commit()
-                        log_access(st.session_state.user_id, "utilisateurs", f"Modification permissions ID:{user_id_perm}")
-                        st.success("✅ Permissions mises à jour avec succès! L'utilisateur devra se reconnecter pour appliquer les changements.")
-                        st.rerun()
-                    except Exception as e:
-                        conn.rollback()
-                        st.error(f"❌ Erreur: {e}")
-                    finally:
-                        release_connection(conn)
-
-# ========== RAPPORTS & EXPORTS (À COMPLÉTER) ==========
+# ========== RAPPORTS & EXPORTS ==========
 elif menu == "Rapports & Exports":
     if not has_access("rapports"):
         st.error("❌ Accès refusé")
         st.stop()
-        
+    
     log_access(st.session_state.user_id, "rapports", "Consultation")
-    st.header("📊 Rapports et Exports")
+    st.header("📊 Rapports & Exports")
     
-    st.info("Cette section sera dédiée à la génération de rapports financiers, d'inventaire et d'exports de données.")
+    tab1, tab2, tab3 = st.tabs(["📈 Statistiques", "💾 Exports", "📉 Analyses"])
     
-    tab_commandes, tab_achats, tab_logs = st.tabs(["Commandes", "Achats", "Logs d'Accès"])
-    
-    with tab_commandes:
-        st.subheader("Rapport de Commandes")
+    with tab1:
+        st.subheader("📊 Vue d'Ensemble")
+        
+        clients = get_clients()
+        produits = get_produits()
         commandes = get_commandes()
-        if not commandes.empty:
-            st.dataframe(commandes, use_container_width=True)
-            csv = commandes.to_csv(index=False).encode('utf-8')
-            st.download_button("⬇️ Exporter en CSV", csv, "commandes_export.csv", "text/csv")
-        else:
-            st.info("Aucune donnée de commande.")
-
-    with tab_achats:
-        st.subheader("Rapport d'Achats")
         achats = get_achats()
-        if not achats.empty:
-            st.dataframe(achats, use_container_width=True)
-            csv = achats.to_csv(index=False).encode('utf-8')
-            st.download_button("⬇️ Exporter en CSV", csv, "achats_export.csv", "text/csv")
-        else:
-            st.info("Aucune donnée d'achat.")
-
-    with tab_logs:
-        if st.session_state.role == "admin":
-            st.subheader("Logs d'Accès Système")
-            conn = get_connection()
-            try:
-                logs = pd.read_sql_query("""SELECT l.date_heure, u.username, l.module, l.action 
-                                            FROM logs_acces l
-                                            JOIN utilisateurs u ON l.user_id = u.id
-                                            ORDER BY l.date_heure DESC""", conn)
-            finally:
-                release_connection(conn)
-
-            if not logs.empty:
-                st.dataframe(logs, use_container_width=True)
-                csv = logs.to_csv(index=False).encode('utf-8')
-                st.download_button("⬇️ Exporter les Logs en CSV", csv, "logs_export.csv", "text/csv")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("👥 Total Clients", len(clients))
+        with col2:
+            st.metric("📦 Total Produits", len(produits))
+        with col3:
+            st.metric("🛒 Total Commandes", len(commandes))
+        with col4:
+            if not commandes.empty:
+                ca = commandes['montant'].sum()
+                st.metric("💰 CA Total", f"{ca:.2f} €")
             else:
-                st.info("Aucun log d'accès enregistré.")
+                st.metric("💰 CA Total", "0.00 €")
+        
+        st.divider()
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("📊 Commandes par Statut")
+            if not commandes.empty:
+                st.bar_chart(commandes['statut'].value_counts())
+            else:
+                st.info("Pas de données")
+        
+        with col2:
+            st.subheader("📦 Top 5 Produits")
+            if not commandes.empty:
+                top_produits = commandes.groupby('produit')['quantite'].sum().sort_values(ascending=False).head(5)
+                st.bar_chart(top_produits)
+            else:
+                st.info("Pas de données")
+    
+    with tab2:
+        st.subheader("💾 Exporter les Données")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**Export Clients**")
+            clients = get_clients()
+            if not clients.empty:
+                csv_clients = clients.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Télécharger Clients (CSV)",
+                    data=csv_clients,
+                    file_name=f"clients_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("Pas de données")
+            
+            st.write("**Export Produits**")
+            produits = get_produits()
+            if not produits.empty:
+                csv_produits = produits.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Télécharger Produits (CSV)",
+                    data=csv_produits,
+                    file_name=f"produits_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("Pas de données")
+        
+        with col2:
+            st.write("**Export Commandes**")
+            commandes = get_commandes()
+            if not commandes.empty:
+                csv_commandes = commandes.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Télécharger Commandes (CSV)",
+                    data=csv_commandes,
+                    file_name=f"commandes_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("Pas de données")
+            
+            st.write("**Export Achats**")
+            achats = get_achats()
+            if not achats.empty:
+                csv_achats = achats.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Télécharger Achats (CSV)",
+                    data=csv_achats,
+                    file_name=f"achats_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("Pas de données")
+    
+    with tab3:
+        st.subheader("📉 Analyses Avancées")
+        
+        commandes = get_commandes()
+        
+        if not commandes.empty:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("**Évolution des Commandes**")
+                if 'date' in commandes.columns:
+                    commandes_par_date = commandes.groupby('date').size()
+                    st.line_chart(commandes_par_date)
+            
+            with col2:
+                st.write("**CA par Client**")
+                ca_par_client = commandes.groupby('client')['montant'].sum().sort_values(ascending=False).head(10)
+                st.bar_chart(ca_par_client)
         else:
-            st.warning("⚠️ Vous devez être administrateur pour consulter les logs.")
+            st.info("Pas assez de données pour les analyses")
+
+# ========== GESTION DES UTILISATEURS ==========
+elif menu == "Gestion des Utilisateurs":
+    if not has_access("utilisateurs"):
+        st.error("❌ Accès refusé")
+        st.stop()
+    
+    log_access(st.session_state.user_id, "utilisateurs", "Consultation")
+    st.header("👤 Gestion des Utilisateurs & Permissions")
+    
+    tab1, tab2, tab3 = st.tabs(["📋 Utilisateurs", "🔑 Permissions", "📊 Logs"])
+    
+    with tab1:
+        st.subheader("📋 Liste des Utilisateurs")
+        conn = get_connection()
+        try:
+            users = pd.read_sql_query("SELECT id, username, role, date_creation FROM utilisateurs ORDER BY id", conn)
+            st.dataframe(users, use_container_width=True, hide_index=True)
+            
+            st.divider()
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                user_id = st.selectbox("Supprimer", users['id'].tolist(),
+                                      format_func=lambda x: users[users['id']==x]['username'].iloc[0])
+            with col2:
+                st.write("")
+                st.write("")
+                if st.button("🗑️ Supprimer"):
+                    if users[users['id']==user_id]['username'].iloc[0] == st.session_state.username:
+                        st.error("❌ Impossible de vous auto-supprimer")
+                    else:
+                        c = conn.cursor()
+                        c.execute("DELETE FROM utilisateurs WHERE id=%s", (int(user_id),))
+                        conn.commit()
+                        log_access(st.session_state.user_id, "utilisateurs", f"Suppression ID:{user_id}")
+                        st.success("✅ Utilisateur supprimé")
+                        st.rerun()
+        finally:
+            release_connection(conn)
+    
+    with tab2:
+        st.subheader("🔑 Gérer les Permissions")
+        conn = get_connection()
+        try:
+            users = pd.read_sql_query("SELECT id, username, role FROM utilisateurs", conn)
+            user_sel = st.selectbox("Utilisateur", users['id'].tolist(),
+                                   format_func=lambda x: f"{users[users['id']==x]['username'].iloc[0]} ({users[users['id']==x]['role'].iloc[0]})")
+            
+            st.divider()
+            
+            c = conn.cursor()
+            c.execute("SELECT module, acces_lecture, acces_ecriture FROM permissions WHERE user_id=%s", (user_sel,))
+            perms = {r[0]: {'lecture': bool(r[1]), 'ecriture': bool(r[2])} for r in c.fetchall()}
+            
+            modules = ["tableau_bord", "clients", "produits", "fournisseurs", "commandes", "achats", "rapports", "utilisateurs"]
+            new_perms = {}
+            
+            for mod in modules:
+                st.write(f"**{mod.replace('_', ' ').title()}**")
+                col1, col2 = st.columns(2)
+                current = perms.get(mod, {'lecture': False, 'ecriture': False})
+                with col1:
+                    lec = st.checkbox(f"📖 Lecture", value=current['lecture'], key=f"{mod}_lec")
+                with col2:
+                    ecr = st.checkbox(f"✏️ Écriture", value=current['ecriture'], key=f"{mod}_ecr")
+                new_perms[mod] = {'lecture': lec, 'ecriture': ecr}
+                st.divider()
+            
+            if st.button("💾 Enregistrer Permissions", type="primary", use_container_width=True):
+                user_sel_py = int(user_sel)
+                c.execute("DELETE FROM permissions WHERE user_id=%s", (user_sel_py,))
+                for mod, p in new_perms.items():
+                    if p['lecture'] or p['ecriture']:
+                        c.execute("INSERT INTO permissions (user_id, module, acces_lecture, acces_ecriture) VALUES (%s, %s, %s, %s)",
+                                  (user_sel_py, mod, p['lecture'], p['ecriture']))
+                conn.commit()
+                log_access(st.session_state.user_id, "utilisateurs", f"MAJ permissions ID:{user_sel}")
+                st.success("✅ Permissions mises à jour")
+                st.rerun()
+        finally:
+            release_connection(conn)
+    
+    with tab3:
+        st.subheader("📊 Logs d'Accès")
+        conn = get_connection()
+        try:
+            logs = pd.read_sql_query("""
+                SELECT l.date_heure, u.username, l.module, l.action
+                FROM logs_acces l
+                JOIN utilisateurs u ON l.user_id = u.id
+                ORDER BY l.date_heure DESC
+                LIMIT 100
+            """, conn)
+            
+            if not logs.empty:
+                st.dataframe(logs, use_container_width=True, hide_index=True)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("📈 Actions par Module")
+                    st.bar_chart(logs['module'].value_counts())
+                with col2:
+                    st.subheader("👥 Actions par Utilisateur")
+                    st.bar_chart(logs['username'].value_counts().head(10))
+            else:
+                st.info("Aucun log")
+        finally:
+            release_connection(conn)
 
 # ========== À PROPOS ==========
 elif menu == "À Propos":
-    st.header("ℹ️ À Propos du SYGEP")
-    st.info("""
-        **SYGEP** (Système de Gestion d'Entreprise Pédagogique) est une application Streamlit/Python 
-        développée dans un but éducatif et de démonstration pour la gestion d'entreprise.
-        
-        **Fonctionnalités Clés :**
-        - Authentification multi-utilisateurs avec gestion des rôles et permissions.
-        - Persistance de session via Base de Données (PostgreSQL/Supabase).
-        - Gestion des Clients, Produits, Fournisseurs, Commandes et Achats.
-        - Tableau de bord avec indicateurs de performance (KPI) et alertes de stock.
-        - Sécurité renforcée (hachage des mots de passe).
-        
-        **Développé par :** ISMAILI ALAOUI MOHAMED
-        **Rôle :** Formateur en Logistique et Transport
-        **Établissement :** IFMLT ZENATA - OFPPT
+    st.header("ℹ️ À Propos de SYGEP")
+    
+    st.success("""
+    ### 🌐 Mode Multi-Utilisateurs Temps Réel Activé !
+    
+    ✅ **Base de données partagée PostgreSQL (Supabase)**
+    - Tous les étudiants travaillent sur les mêmes données
+    - Synchronisation en temps réel
+    - Aucune perte de données lors de l'actualisation
+    
+    ✅ **Gestion collaborative**
+    - Chaque utilisateur avec ses permissions spécifiques
+    - Traçabilité complète des actions
+    - Workflow coordonné entre rôles
     """)
     
-    st.markdown("---")
-    st.subheader("Technologies Utilisées")
-    st.code("""
-    - Python (Streamlit) : Framework de développement web.
-    - Pandas : Manipulation de données.
-    - Psycopg2 : Connecteur PostgreSQL.
-    - PostgreSQL/Supabase : Base de données.
-    """, language="markdown")
+    st.markdown("""
+    ### 🎓 Objectifs Pédagogiques
+    
+    Ce système ERP permet aux étudiants de :
+    - Comprendre le fonctionnement d'un ERP réel
+    - Travailler en mode collaboratif
+    - Gérer des rôles et permissions
+    - Suivre les flux logistiques complets
+    
+    ### 📚 Modules Implémentés
+    
+    - **Tableau de Bord** : Vue synthétique KPIs
+    - **CRM** : Gestion clients avec CRUD complet
+    - **Inventaire** : Stocks et produits avec alertes
+    - **Fournisseurs** : Partenaires commerciaux
+    - **Ventes** : Commandes clients avec suivi
+    - **Achats** : Approvisionnements et réceptions
+    - **Rapports** : BI et exports CSV
+    - **Administration** : Utilisateurs et sécurité
+    
+    ### 🔧 Technologies
+    
+    - **Frontend** : Streamlit (Python)
+    - **Backend** : PostgreSQL via Supabase
+    - **Hébergement** : Streamlit Cloud
+    - **Sécurité** : SHA-256, Permissions granulaires
+    
+    ### ✨ Nouvelles Fonctionnalités v3.2
+    
+    - ✅ CRUD complet (Create, Read, Update, Delete)
+    - ✅ Menu navigation avec emojis et boutons radio
+    - ✅ Protection des contraintes de clé étrangère
+    - ✅ Interface utilisateur modernisée
+    - ✅ Gestion intelligente du cache
+    
+    ### 👨‍🏫 Développeur
+    
+    **ISMAILI ALAOUI MOHAMED**  
+    Formateur en Logistique et Transport  
+    IFMLT ZENATA - OFPPT
+    
+    ---
+    
+    Version 3.2 - CRUD Complet avec Navigation Améliorée
+    """)
+
+# ========== FOOTER SIDEBAR ==========
+st.sidebar.markdown("---")
+date_footer = datetime.now().strftime('%d/%m/%Y')
+st.sidebar.markdown(f"""
+<div style="background-color: #f8fafc; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0;">
+    <p style="margin: 0; font-size: 11px; color: #64748b; text-align: center;">
+        <strong style="color: #1e40af;">SYGEP v3.2</strong><br>
+        🌐 Mode Temps Réel Activé
+    </p>
+    <hr style="margin: 10px 0; border: 0; border-top: 1px solid #cbd5e1;">
+    <p style="margin: 0; font-size: 10px; color: #64748b; text-align: center;">
+        Développé par<br>
+        <strong style="color: #1e3a8a;">ISMAILI ALAOUI MOHAMED</strong><br>
+        Formateur en Logistique et Transport<br>
+        <strong>IFMLT ZENATA - OFPPT</strong>
+    </p>
+    <hr style="margin: 10px 0; border: 0; border-top: 1px solid #cbd5e1;">
+    <p style="margin: 0; font-size: 10px; color: #64748b; text-align: center;">
+        📅 {date_footer}<br>
+        Session: <strong>{st.session_state.username if st.session_state.logged_in else 'N/A'}</strong>
+    </p>
+</div>
+""", unsafe_allow_html=True)
+
+if st.session_state.logged_in:
+    with st.sidebar.expander("ℹ️ Info Session"):
+        st.write(f"**User ID:** {st.session_state.user_id}")
+        st.write(f"**Rôle:** {st.session_state.role}")
+        if st.session_state.session_id:
+            st.write(f"**Session ID:** {st.session_state.session_id[:8]}...")
+        st.write("**Statut:** 🟢 Connecté")
+        st.write("**Mode:** 🌐 Temps Réel")
+        st.caption("Base de données partagée PostgreSQL/Supabase")
