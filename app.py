@@ -554,7 +554,6 @@ if not st.session_state.logged_in:
                     else:
                         st.error("❌ Identifiants incorrects")
             
-            st.info("💡 **Compte par défaut**\nUsername: admin\nPassword: admin123")
             st.success("🌐 **Mode Multi-Utilisateurs Temps Réel Activé**")
 
     with tab_client_order:
