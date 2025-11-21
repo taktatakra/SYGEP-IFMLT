@@ -363,7 +363,6 @@ def page_passer_commande_publique():
     st.title("🛍️ Passer une Nouvelle Commande (Espace Client)")
     st.markdown("---")
     
-    clients = get_clients()
     produits = get_produits()
     
     if produits.empty:
@@ -381,13 +380,13 @@ def page_passer_commande_publique():
         
         nom_client = st.text_input("Votre Nom/Nom de Société *")
         email_client = st.text_input("Votre Email *")
+        telephone_client = st.text_input("Votre Téléphone")
         
         st.subheader("2. Votre Commande")
         
         produits_map = {f"{r['nom']} - {r['prix']:.2f} € (Stock: {r['stock']})": r['id'] for _, r in produits_disponibles.iterrows()}
         selected_product_label = st.selectbox("Produit *", list(produits_map.keys()))
         
-        quantite = 0
         produit_id = None
         montant_estime = 0.0
 
@@ -395,62 +394,80 @@ def page_passer_commande_publique():
             produit_id = produits_map[selected_product_label]
             produit_data = produits_disponibles[produits_disponibles['id'] == produit_id].iloc[0]
             
-            quantite_max = produit_data['stock']
-            quantite = st.number_input("Quantité *", min_value=1, max_value=int(quantite_max), step=1, value=1)
+            quantite_max = int(produit_data['stock'])
+            quantite = st.number_input("Quantité *", min_value=1, max_value=quantite_max, step=1, value=1, key="quantite_publique")
 
-            montant_estime = produit_data['prix'] * quantite
+            montant_estime = float(produit_data['prix']) * quantite
             st.info(f"Montant estimé de la commande : **{montant_estime:.2f} €** (hors taxes et livraison)")
 
         submit = st.form_submit_button("Envoyer la Commande", type="primary", use_container_width=True)
         
         if submit:
-            if not nom_client or not email_client or quantite <= 0:
-                st.error("❌ Veuillez remplir tous les champs obligatoires (Nom, Email, Quantité > 0).")
+            if not nom_client or not email_client:
+                st.error("❌ Veuillez remplir tous les champs obligatoires (Nom et Email).")
+                return
+            
+            if not produit_id:
+                st.error("❌ Veuillez sélectionner un produit.")
                 return
 
             conn = get_connection()
             try:
                 c = conn.cursor()
                 
+                # Vérifier si le client existe
                 c.execute("SELECT id FROM clients WHERE email = %s", (email_client,))
                 client_data = c.fetchone()
                 
                 if client_data:
                     client_id = client_data[0]
                 else:
-                    st.info(f"Client '{nom_client}' non trouvé (email: {email_client}). Création d'un nouveau client.")
-                    c.execute("INSERT INTO clients (nom, email, date_creation) VALUES (%s, %s, CURRENT_DATE) RETURNING id",
-                              (nom_client, email_client))
+                    # Créer le nouveau client
+                    st.info(f"Client '{nom_client}' non trouvé. Création d'un nouveau client.")
+                    c.execute("""INSERT INTO clients (nom, email, telephone, date_creation) 
+                                VALUES (%s, %s, %s, CURRENT_DATE) RETURNING id""",
+                              (nom_client, email_client, telephone_client if telephone_client else None))
                     client_id = c.fetchone()[0]
+                    conn.commit()  # Commit la création du client
                 
+                # Convertir en types Python natifs
                 produit_id_py = int(produit_id)
                 quantite_py = int(quantite)
                 client_id_py = int(client_id)
                 
+                # Vérifier le stock disponible
                 c.execute("SELECT stock FROM produits WHERE id = %s", (produit_id_py,))
-                current_stock = c.fetchone()[0]
+                stock_result = c.fetchone()
+                
+                if not stock_result:
+                    st.error("❌ Produit introuvable.")
+                    return
+                    
+                current_stock = int(stock_result[0])
                 
                 if current_stock >= quantite_py:
-                    
+                    # Créer la commande SANS décrémenter le stock
                     c.execute("""INSERT INTO commandes (client_id, produit_id, quantite, date, statut) 
                                 VALUES (%s, %s, %s, CURRENT_DATE, 'En attente')""",
                               (client_id_py, produit_id_py, quantite_py))
                     
-                    c.execute("UPDATE produits SET stock = stock - %s WHERE id = %s", (quantite_py, produit_id_py))
-                    
                     conn.commit()
                     
-                    st.success(f"✅ Commande envoyée avec succès ! Montant estimé: {montant_estime:.2f} €. Elle est en statut 'En attente' de validation interne.")
+                    st.success(f"✅ Commande envoyée avec succès ! Montant estimé: {montant_estime:.2f} €.")
+                    st.info("📋 Votre commande est en attente de validation par notre équipe.")
                     st.balloons()
                     
+                    # Invalider les caches
                     get_pending_orders_count.clear()
+                    get_commandes.clear()
+                    get_clients.clear()
                 else:
                     conn.rollback()
-                    st.error(f"❌ Erreur: Stock insuffisant ! Disponible: {current_stock}")
+                    st.error(f"❌ Stock insuffisant ! Disponible: {current_stock}, Demandé: {quantite_py}")
                 
             except Exception as e:
                 conn.rollback()
-                st.error(f"❌ Une erreur est survenue lors de l'enregistrement de la commande: {e}")
+                st.error(f"❌ Une erreur est survenue: {e}")
             finally:
                 release_connection(conn)
 
@@ -1237,16 +1254,50 @@ elif menu == "Gestion des Commandes":
                             conn = get_connection()
                             try:
                                 c = conn.cursor()
-                                c.execute("UPDATE commandes SET statut = %s WHERE id = %s", (statut, int(cmd_id)))
-                                conn.commit()
-                                log_access(st.session_state.user_id, "commandes", f"MAJ statut ID:{cmd_id}")
-                                st.success(f"Statut: {statut}")
                                 
-                                if statut != 'En attente':
-                                    get_pending_orders_count.clear()
+                                # Récupérer les infos de la commande
+                                c.execute("SELECT statut, produit_id, quantite FROM commandes WHERE id = %s", (int(cmd_id),))
+                                cmd_data = c.fetchone()
+                                
+                                if cmd_data:
+                                    ancien_statut = cmd_data[0]
+                                    produit_id = int(cmd_data[1])
+                                    quantite = int(cmd_data[2])
                                     
-                                get_commandes.clear()
-                                st.rerun()
+                                    # Logique de décrémentation du stock
+                                    # Décrémenter uniquement si on passe de "En attente" à "En cours" ou "Livrée"
+                                    if ancien_statut == "En attente" and statut in ["En cours", "Livrée"]:
+                                        # Vérifier le stock disponible
+                                        c.execute("SELECT stock FROM produits WHERE id = %s", (produit_id,))
+                                        stock_actuel = int(c.fetchone()[0])
+                                        
+                                        if stock_actuel >= quantite:
+                                            c.execute("UPDATE produits SET stock = stock - %s WHERE id = %s", (quantite, produit_id))
+                                            st.info(f"📦 Stock décrémenté de {quantite} unités")
+                                        else:
+                                            st.error(f"❌ Stock insuffisant ! Disponible: {stock_actuel}, Requis: {quantite}")
+                                            conn.rollback()
+                                            continue
+                                    
+                                    # Recrémenter si on annule une commande qui était validée
+                                    elif ancien_statut in ["En cours", "Livrée"] and statut == "Annulée":
+                                        c.execute("UPDATE produits SET stock = stock + %s WHERE id = %s", (quantite, produit_id))
+                                        st.info(f"📦 Stock recrédité de {quantite} unités")
+                                    
+                                    # Mettre à jour le statut
+                                    c.execute("UPDATE commandes SET statut = %s WHERE id = %s", (statut, int(cmd_id)))
+                                    conn.commit()
+                                    
+                                    log_access(st.session_state.user_id, "commandes", f"MAJ statut ID:{cmd_id} -> {statut}")
+                                    st.success(f"✅ Statut changé: {statut}")
+                                    
+                                    if statut != 'En attente':
+                                        get_pending_orders_count.clear()
+                                    
+                                    get_commandes.clear()
+                                    get_produits.clear()
+                                    st.rerun()
+                                    
                             except Exception as e:
                                 conn.rollback()
                                 st.error(f"❌ Erreur: {e}")
@@ -1266,12 +1317,28 @@ elif menu == "Gestion des Commandes":
                             conn = get_connection()
                             try:
                                 c = conn.cursor()
+                                
+                                # Avant de supprimer, vérifier si le stock doit être recrédité
+                                c.execute("SELECT statut, produit_id, quantite FROM commandes WHERE id = %s", (int(cmd_del_id),))
+                                cmd_data = c.fetchone()
+                                
+                                if cmd_data:
+                                    statut_cmd = cmd_data[0]
+                                    produit_id = int(cmd_data[1])
+                                    quantite = int(cmd_data[2])
+                                    
+                                    # Si la commande était validée (En cours ou Livrée), recréditer le stock
+                                    if statut_cmd in ["En cours", "Livrée"]:
+                                        c.execute("UPDATE produits SET stock = stock + %s WHERE id = %s", (quantite, produit_id))
+                                        st.info(f"📦 Stock recrédité de {quantite} unités")
+                                
                                 c.execute("DELETE FROM commandes WHERE id=%s", (int(cmd_del_id),))
                                 conn.commit()
                                 log_access(st.session_state.user_id, "commandes", f"Suppression ID:{cmd_del_id}")
                                 st.success("✅ Commande supprimée!")
                                 get_commandes.clear()
                                 get_pending_orders_count.clear()
+                                get_produits.clear()
                                 st.rerun()
                             except Exception as e:
                                 conn.rollback()
@@ -1297,7 +1364,12 @@ elif menu == "Gestion des Commandes":
                                             format_func=lambda x: clients[clients['id']==x]['nom'].iloc[0])
                     produit_id = st.selectbox("Produit *", produits['id'].tolist(),
                                              format_func=lambda x: f"{produits[produits['id']==x]['nom'].iloc[0]} - {produits[produits['id']==x]['prix'].iloc[0]:.2f} €")
-                    quantite = st.number_input("Quantité *", min_value=1, step=1, value=1)
+                    
+                    # Récupérer le stock max pour ce produit
+                    produit_selectionne = produits[produits['id'] == produit_id].iloc[0]
+                    stock_max = int(produit_selectionne['stock'])
+                    
+                    quantite = st.number_input("Quantité *", min_value=1, max_value=stock_max, step=1, value=1, key="quantite_interne")
                     
                     col1, col2 = st.columns(2)
                     with col1:
@@ -1307,20 +1379,24 @@ elif menu == "Gestion des Commandes":
                     
                     if submit:
                         produit = produits[produits['id'] == produit_id].iloc[0]
-                        if produit['stock'] >= quantite:
+                        stock_actuel = int(produit['stock'])
+                        quantite_int = int(quantite)
+                        
+                        if stock_actuel >= quantite_int:
                             conn = get_connection()
                             try:
                                 c = conn.cursor()
                                 client_id_py = int(client_id)
                                 produit_id_py = int(produit_id)
-                                quantite_py = int(quantite)
                                 
+                                # Créer la commande avec statut "En cours" et décrémenter directement
                                 c.execute("""INSERT INTO commandes (client_id, produit_id, quantite, date, statut) 
                                             VALUES (%s, %s, %s, CURRENT_DATE, 'En cours')""",
-                                          (client_id_py, produit_id_py, quantite_py))
-                                c.execute("UPDATE produits SET stock = stock - %s WHERE id = %s", (quantite_py, produit_id_py))
+                                          (client_id_py, produit_id_py, quantite_int))
+                                c.execute("UPDATE produits SET stock = stock - %s WHERE id = %s", (quantite_int, produit_id_py))
                                 conn.commit()
-                                montant = produit['prix'] * quantite
+                                
+                                montant = float(produit['prix']) * quantite_int
                                 log_access(st.session_state.user_id, "commandes", f"Création: {montant:.2f}€")
                                 st.success(f"✅ Commande créée ! Montant: {montant:.2f} €")
                                 get_commandes.clear()
@@ -1332,7 +1408,7 @@ elif menu == "Gestion des Commandes":
                             finally:
                                 release_connection(conn)
                         else:
-                            st.error(f"❌ Stock insuffisant ! Dispo: {produit['stock']}")
+                            st.error(f"❌ Stock insuffisant ! Dispo: {stock_actuel}")
 
 # ========== GESTION DES ACHATS ==========
 elif menu == "Gestion des Achats":
