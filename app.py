@@ -556,9 +556,10 @@ def page_passer_commande_publique():
 
     st.subheader("1. Vos Informations")
     
-    nom_client = st.text_input("Votre Nom/Nom de Société *", key="nom_client_public")
-    email_client = st.text_input("Votre Email *", key="email_client_public")
-    telephone_client = st.text_input("Votre Téléphone", key="tel_client_public")
+    # Utiliser des clés uniques et récupérer les valeurs directement
+    nom_client = st.text_input("Votre Nom/Nom de Société *", key="nom_client_public", placeholder="Ex: Entreprise ABC")
+    email_client = st.text_input("Votre Email *", key="email_client_public", placeholder="contact@exemple.com")
+    telephone_client = st.text_input("Votre Téléphone", key="tel_client_public", placeholder="0612345678")
     
     st.subheader("2. Votre Commande")
     
@@ -577,6 +578,7 @@ def page_passer_commande_publique():
     produit_id = None
     montant_estime = 0.0
     stock_disponible = 0
+    quantite = 1
 
     if selected_product_label and selected_product_label != "-- Sélectionner un produit --":
         # Extraire le nom du produit de la sélection
@@ -609,7 +611,7 @@ def page_passer_commande_publique():
                 step=1,
                 key="qte_input_public"
             )
-            st.session_state.quantite_cmd_publique = quantite
+            st.session_state.quantite_cmd_publique = int(quantite)
         
         with col3:
             if st.button("➕", key="plus_qte"):
@@ -617,18 +619,36 @@ def page_passer_commande_publique():
                     st.session_state.quantite_cmd_publique += 1
                     st.rerun()
         
-        montant_estime = prix * quantite
+        montant_estime = prix * st.session_state.quantite_cmd_publique
         st.info(f"💰 Montant estimé de la commande : **{montant_estime:.2f} €** (hors taxes et livraison)")
 
     st.markdown("---")
     
+    # Bouton de soumission avec validation
     if st.button("📤 Envoyer la Commande", type="primary", use_container_width=True, key="submit_cmd_public"):
-        if not nom_client or not email_client:
+        
+        # Récupérer les valeurs des inputs via session_state
+        nom_saisi = st.session_state.get("nom_client_public", "").strip()
+        email_saisi = st.session_state.get("email_client_public", "").strip()
+        tel_saisi = st.session_state.get("tel_client_public", "").strip()
+        
+        # Validation des champs obligatoires
+        if not nom_saisi or not email_saisi:
             st.error("❌ Veuillez remplir tous les champs obligatoires (Nom et Email).")
+            st.warning(f"🔍 Nom rempli: {'Oui' if nom_saisi else 'Non'} | Email rempli: {'Oui' if email_saisi else 'Non'}")
+            return
+        
+        # Validation du format email
+        if "@" not in email_saisi or "." not in email_saisi.split("@")[-1]:
+            st.error("❌ Veuillez saisir une adresse email valide.")
             return
         
         if not produit_id or selected_product_label == "-- Sélectionner un produit --":
             st.error("❌ Veuillez sélectionner un produit.")
+            return
+        
+        if st.session_state.quantite_cmd_publique < 1:
+            st.error("❌ La quantité doit être au moins 1.")
             return
 
         conn = get_connection()
@@ -636,18 +656,18 @@ def page_passer_commande_publique():
             c = conn.cursor()
             
             # Vérifier si le client existe
-            c.execute("SELECT id FROM clients WHERE LOWER(email) = LOWER(%s)", (email_client,))
+            c.execute("SELECT id FROM clients WHERE LOWER(email) = LOWER(%s)", (email_saisi,))
             client_data = c.fetchone()
             
             if client_data:
                 client_id = int(client_data[0])
-                st.info(f"✅ Client reconnu : {nom_client}")
+                st.info(f"✅ Client reconnu : {nom_saisi}")
             else:
                 # Créer le nouveau client
-                st.info(f"🆕 Nouveau client : création du compte pour {nom_client}")
+                st.info(f"🆕 Nouveau client : création du compte pour {nom_saisi}")
                 c.execute("""INSERT INTO clients (nom, email, telephone, date_creation) 
                             VALUES (%s, %s, %s, CURRENT_DATE) RETURNING id""",
-                          (nom_client, email_client, telephone_client if telephone_client else None))
+                          (nom_saisi, email_saisi, tel_saisi if tel_saisi else None))
                 client_id = int(c.fetchone()[0])
                 conn.commit()  # Commit immédiat
                 
@@ -677,7 +697,7 @@ def page_passer_commande_publique():
                 st.success(f"✅ Commande envoyée avec succès !")
                 st.success(f"📋 Montant estimé : **{montant_estime:.2f} €**")
                 st.info("⏳ Votre commande est **en attente de validation** par notre équipe.")
-                st.info("📧 Vous recevrez un email de confirmation à : " + email_client)
+                st.info(f"📧 Vous recevrez un email de confirmation à : {email_saisi}")
                 st.balloons()
                 
                 # Invalider les caches
@@ -687,6 +707,14 @@ def page_passer_commande_publique():
                 # Reset session state
                 st.session_state.quantite_cmd_publique = 1
                 st.session_state.produit_selectionne = None
+                
+                # Réinitialiser les champs du formulaire
+                if "nom_client_public" in st.session_state:
+                    del st.session_state.nom_client_public
+                if "email_client_public" in st.session_state:
+                    del st.session_state.email_client_public
+                if "tel_client_public" in st.session_state:
+                    del st.session_state.tel_client_public
                 
             else:
                 conn.rollback()
