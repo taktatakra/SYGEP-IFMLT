@@ -1208,7 +1208,7 @@ if not st.session_state.logged_in:
                     else:
                         st.error("❌ Identifiants incorrects")
             
-            st.success("🌐 **Mode Multi-Utilisateurs Temps Réel Activé**")
+            st.success("🌐 Mode Multi-Utilisateurs Temps Réel Activé")
 
     with tab_client_order:
         page_passer_commande_publique()
