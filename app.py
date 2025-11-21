@@ -724,20 +724,31 @@ elif menu == "Gestion des Commandes":
                     with col_x:
                         cmd_del_id = st.selectbox("Commande à supprimer", commandes['id'].tolist(),
                                                  format_func=lambda x: f"Commande #{x}")
-                    with col_y:
-                        st.write("")
-                        st.write("")
-                        if st.button("🗑️ Supprimer", type="secondary", key="del_cmd"):
-                            conn = get_connection()
-                            try:
-                                c = conn.cursor()
-                                c.execute("SELECT statut, produit_id, quantite FROM commandes WHERE id = %s", (int(cmd_deler utilisateur admin par défaut si n'existe pas
-        c.execute("SELECT COUNT(*) FROM utilisateurs WHERE username = %s", ('admin',))
-        if c.fetchone()[0] == 0:
-            password_hash = hashlib.sha256("admin123".encode()).hexdigest()
-            c.execute("INSERT INTO utilisateurs (username, password, role) VALUES (%s, %s, %s) RETURNING id",
-                      ('admin', password_hash, 'admin'))
-            user_id = c.fetchone()[0]
+                  with col_y:
+    st.write("")
+    st.write("")
+
+    if st.button("🗑️ Supprimer", type="secondary", key="del_cmd"):
+        conn = get_connection()
+        try:
+            c = conn.cursor()
+
+            # On récupère le statut, produit et quantité de la commande
+            c.execute(
+                "SELECT statut, produit_id, quantite FROM commandes WHERE id = %s",
+                (int(cmd_del),)
+            )
+
+            # Vérification utilisateur admin par défaut
+            c.execute("SELECT COUNT(*) FROM utilisateurs WHERE username = %s", ('admin',))
+            if c.fetchone()[0] == 0:
+                password_hash = hashlib.sha256("admin123".encode()).hexdigest()
+                c.execute(
+                    "INSERT INTO utilisateurs (username, password, role) VALUES (%s, %s, %s) RETURNING id",
+                    ('admin', password_hash, 'admin')
+                )
+                user_id = c.fetchone()[0]
+
             
             modules = ["tableau_bord", "clients", "produits", "fournisseurs", "commandes", "achats", "rapports", "utilisateurs"]
             for module in modules:
@@ -2471,5 +2482,6 @@ if st.session_state.logged_in:
         st.write("**Statut:** 🟢 Connecté")
         st.write("**Mode:** 🌐 Temps Réel")
         st.caption("Base de données partagée PostgreSQL/Supabase")
+
 
 
