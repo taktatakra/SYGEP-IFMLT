@@ -1276,9 +1276,7 @@ elif menu == "Gestion des Commandes":
                                             st.info(f"📦 Stock décrémenté de {quantite} unités")
                                         else:
                                             st.error(f"❌ Stock insuffisant ! Disponible: {stock_actuel}, Requis: {quantite}")
-                                            conn.rollback()
-                                            continue
-                                    
+                                            conn.rollback()               
                                     # Recrémenter si on annule une commande qui était validée
                                     elif ancien_statut in ["En cours", "Livrée"] and statut == "Annulée":
                                         c.execute("UPDATE produits SET stock = stock + %s WHERE id = %s", (quantite, produit_id))
@@ -1883,3 +1881,4 @@ if st.session_state.logged_in:
         st.write("**Statut:** 🟢 Connecté")
         st.write("**Mode:** 🌐 Temps Réel")
         st.caption("Base de données partagée PostgreSQL/Supabase")
+
