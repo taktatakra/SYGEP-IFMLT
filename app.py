@@ -1347,6 +1347,8 @@ elif menu == "Gestion des Utilisateurs":
                         conn.commit()
                         st.success("✅ Utilisateur supprimé")
                         st.rerun()
+        except Exception as e:
+            st.error(f"❌ Erreur: {e}")
         finally:
             release_connection(conn)
     
