@@ -1332,15 +1332,22 @@ elif menu == "Gestion des Commandes":
                                     if ancien_statut == "En attente" and statut in ["En cours", "Livrée"]:
                                         # Vérifier le stock disponible
                                         c.execute("SELECT stock FROM produits WHERE id = %s", (produit_id,))
-                                        stock_actuel = int(c.fetchone()[0])
+                                        stock_result = c.fetchone()
                                         
-                                        if stock_actuel >= quantite:
-                                            c.execute("UPDATE produits SET stock = stock - %s WHERE id = %s", (quantite, produit_id))
-                                            st.info(f"📦 Stock décrémenté de {quantite} unités")
+                                        if stock_result:
+                                            stock_actuel = int(stock_result[0])
+                                            
+                                            if stock_actuel >= quantite:
+                                                c.execute("UPDATE produits SET stock = stock - %s WHERE id = %s", (quantite, produit_id))
+                                                st.info(f"📦 Stock décrémenté de {quantite} unités")
+                                            else:
+                                                st.error(f"❌ Stock insuffisant ! Disponible: {stock_actuel}, Requis: {quantite}")
+                                                conn.rollback()
+                                                st.stop()
                                         else:
-                                            st.error(f"❌ Stock insuffisant ! Disponible: {stock_actuel}, Requis: {quantite}")
+                                            st.error("❌ Produit introuvable")
                                             conn.rollback()
-                                            continue
+                                            st.stop()
                                     
                                     # Recrémenter si on annule une commande qui était validée
                                     elif ancien_statut in ["En cours", "Livrée"] and statut == "Annulée":
@@ -1360,6 +1367,8 @@ elif menu == "Gestion des Commandes":
                                     get_commandes.clear()
                                     get_produits.clear()
                                     st.rerun()
+                                else:
+                                    st.error("❌ Commande introuvable")
                                     
                             except Exception as e:
                                 conn.rollback()
