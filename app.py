@@ -133,8 +133,7 @@ def init_database():
                       username VARCHAR(100),
                       role VARCHAR(50),
                       last_activity TIMESTAMP)''')
-        
-        # Table Logs
+         # Table Logs
         c.execute('''CREATE TABLE IF NOT EXISTS logs_acces
                      (id SERIAL PRIMARY KEY,
                       user_id INTEGER REFERENCES utilisateurs(id),
@@ -145,7 +144,7 @@ def init_database():
         conn.commit()
         
         # Créer les labels avec emojis pour le radio
-menu_labels = [f"{menu_icons[opt]} {opt}" for opt in menu_options]
+        menu_labels = [f"{menu_icons[opt]} {opt}" for opt in menu_options]
 
 # Menu avec boutons radio
 selected_label = st.sidebar.radio(
@@ -2482,6 +2481,7 @@ if st.session_state.logged_in:
         st.write("**Statut:** 🟢 Connecté")
         st.write("**Mode:** 🌐 Temps Réel")
         st.caption("Base de données partagée PostgreSQL/Supabase")
+
 
 
 
