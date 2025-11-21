@@ -31,11 +31,6 @@ def send_email_notification(to_email, subject, body_html, commande_info=None):
     """
     try:
         # Configuration SMTP - À adapter selon votre service
-        # Option 1: Gmail (nécessite mot de passe d'application)
-        # Option 2: SendGrid, Mailgun, etc.
-        # Option 3: SMTP de votre hébergeur
-        
-        # Vérifier si les configurations email existent
         smtp_server = os.getenv('SMTP_SERVER') or st.secrets.get("email", {}).get("smtp_server")
         smtp_port = os.getenv('SMTP_PORT') or st.secrets.get("email", {}).get("smtp_port", 587)
         smtp_username = os.getenv('SMTP_USERNAME') or st.secrets.get("email", {}).get("username")
@@ -47,6 +42,11 @@ def send_email_notification(to_email, subject, body_html, commande_info=None):
             print(f"📧 [MODE SIMULATION] Email à {to_email}")
             print(f"   Sujet: {subject}")
             print(f"   Contenu: {body_html[:100]}...")
+            # Afficher un message visible dans l'interface
+            st.info(f"📧 **Mode Simulation** : Email simulé pour {to_email}")
+            st.warning("⚠️ Pour activer les vrais emails, configurez les paramètres SMTP dans les secrets Streamlit")
+            with st.expander("📋 Voir le contenu de l'email simulé"):
+                st.markdown(body_html, unsafe_allow_html=True)
             return True  # Simulation réussie
         
         # Créer le message
@@ -75,22 +75,31 @@ def send_email_notification(to_email, subject, body_html, commande_info=None):
 def generer_email_confirmation_commande(client_nom, produit_nom, quantite, montant, numero_commande, statut):
     """Génère le HTML de l'email de confirmation"""
     
-    if statut == "En cours":
+    if statut == "En attente":
+        titre = "Commande reçue"
+        message_statut = "Votre commande a été <strong>reçue avec succès</strong> et est actuellement <strong>en attente de validation</strong> par notre équipe."
+        couleur = "#ffc107"
+        message_suivi = "<p style='background: #fff3cd; padding: 15px; border-radius: 5px; border-left: 4px solid #ffc107;'>⏳ Notre équipe va traiter votre demande dans les plus brefs délais. Vous recevrez un nouvel email dès validation.</p>"
+    elif statut == "En cours":
         titre = "Commande validée et en préparation"
         message_statut = "Votre commande a été <strong>validée</strong> par notre équipe et est actuellement <strong>en préparation</strong>."
         couleur = "#28a745"
+        message_suivi = "<p style='background: #d4edda; padding: 15px; border-radius: 5px; border-left: 4px solid #28a745;'>📦 Votre commande est en cours de préparation et sera bientôt expédiée.</p>"
     elif statut == "Livrée":
         titre = "Commande livrée"
         message_statut = "Votre commande a été <strong>livrée avec succès</strong>."
         couleur = "#007bff"
+        message_suivi = "<p style='background: #d1ecf1; padding: 15px; border-radius: 5px; border-left: 4px solid #007bff;'>✅ Merci pour votre confiance ! N'hésitez pas à nous faire part de vos retours.</p>"
     elif statut == "Annulée":
         titre = "Commande annulée"
         message_statut = "Nous sommes désolés, votre commande a été <strong>annulée</strong>."
         couleur = "#dc3545"
+        message_suivi = "<p style='background: #f8d7da; padding: 15px; border-radius: 5px; border-left: 4px solid #dc3545;'>❌ Pour plus d'informations, n'hésitez pas à nous contacter.</p>"
     else:
-        titre = "Commande reçue"
-        message_statut = "Votre commande a été <strong>reçue</strong> et est en attente de validation."
-        couleur = "#ffc107"
+        titre = "Mise à jour de commande"
+        message_statut = f"Le statut de votre commande a été mis à jour : <strong>{statut}</strong>"
+        couleur = "#6c757d"
+        message_suivi = ""
     
     html = f"""
     <!DOCTYPE html>
@@ -107,7 +116,6 @@ def generer_email_confirmation_commande(client_nom, produit_nom, quantite, monta
             .details {{ margin: 15px 0; }}
             .details-row {{ display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #e9ecef; }}
             .footer {{ text-align: center; margin-top: 30px; padding-top: 20px; border-top: 2px solid #e9ecef; color: #6c757d; font-size: 12px; }}
-            .button {{ display: inline-block; padding: 12px 30px; background: #667eea; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }}
         </style>
     </head>
     <body>
@@ -121,6 +129,8 @@ def generer_email_confirmation_commande(client_nom, produit_nom, quantite, monta
                 <h2 style="color: #333; margin-bottom: 10px;">Bonjour {client_nom},</h2>
                 
                 <p>{message_statut}</p>
+                
+                {message_suivi}
                 
                 <div class="info-box">
                     <p style="margin: 0 0 10px 0;"><strong>Statut actuel :</strong> <span class="statut">{statut.upper()}</span></p>
@@ -689,15 +699,45 @@ def page_passer_commande_publique():
             if current_stock >= quantite_finale:
                 # Créer la commande SANS décrémenter le stock
                 c.execute("""INSERT INTO commandes (client_id, produit_id, quantite, date, statut) 
-                            VALUES (%s, %s, %s, CURRENT_DATE, 'En attente')""",
+                            VALUES (%s, %s, %s, CURRENT_DATE, 'En attente') RETURNING id""",
                           (client_id, produit_id, quantite_finale))
                 
+                nouvelle_commande_id = c.fetchone()[0]
                 conn.commit()
                 
                 st.success(f"✅ Commande envoyée avec succès !")
-                st.success(f"📋 Montant estimé : **{montant_estime:.2f} €**")
+                st.success(f"📋 N° de commande : **#{nouvelle_commande_id}**")
+                st.success(f"💰 Montant estimé : **{montant_estime:.2f} €**")
                 st.info("⏳ Votre commande est **en attente de validation** par notre équipe.")
-                st.info(f"📧 Vous recevrez un email de confirmation à : {email_saisi}")
+                
+                # NOUVEAU : Envoyer un email de confirmation immédiat
+                if email_saisi:
+                    st.divider()
+                    with st.spinner("📧 Envoi de l'email de confirmation..."):
+                        # Récupérer le nom du produit
+                        nom_produit_complet = produits[produits['id'] == produit_id]['nom'].iloc[0]
+                        
+                        sujet = f"SYGEP - Confirmation de réception de votre commande #{nouvelle_commande_id}"
+                        corps_html = generer_email_confirmation_commande(
+                            nom_saisi, 
+                            nom_produit_complet, 
+                            quantite_finale, 
+                            montant_estime, 
+                            nouvelle_commande_id, 
+                            "En attente"
+                        )
+                        
+                        email_envoye = send_email_notification(
+                            email_saisi, 
+                            sujet, 
+                            corps_html
+                        )
+                        
+                        if email_envoye:
+                            st.success(f"📧 Email de confirmation envoyé à **{email_saisi}**")
+                        else:
+                            st.warning(f"⚠️ Email non envoyé (vérifiez la configuration SMTP)")
+                
                 st.balloons()
                 
                 # Invalider les caches
