@@ -1390,6 +1390,8 @@ elif menu == "Gestion des Utilisateurs":
                 conn.commit()
                 st.success("✅ Permissions mises à jour")
                 st.rerun()
+        except Exception as e:
+            st.error(f"❌ Erreur: {e}")
         finally:
             release_connection(conn)
     
@@ -1417,6 +1419,8 @@ elif menu == "Gestion des Utilisateurs":
                     st.bar_chart(logs['username'].value_counts().head(10))
             else:
                 st.info("Aucun log")
+        except Exception as e:
+            st.error(f"❌ Erreur: {e}")
         finally:
             release_connection(conn)
 
