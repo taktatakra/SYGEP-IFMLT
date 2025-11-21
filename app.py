@@ -8,6 +8,9 @@ import os
 import psycopg2
 from psycopg2 import pool
 from dotenv import load_dotenv
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 # Charger les variables d'environnement
 load_dotenv()
@@ -20,6 +23,145 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# ========== FONCTION D'ENVOI D'EMAIL ==========
+def send_email_notification(to_email, subject, body_html, commande_info=None):
+    """
+    Envoie un email de notification au client
+    Retourne True si succès, False sinon
+    """
+    try:
+        # Configuration SMTP - À adapter selon votre service
+        # Option 1: Gmail (nécessite mot de passe d'application)
+        # Option 2: SendGrid, Mailgun, etc.
+        # Option 3: SMTP de votre hébergeur
+        
+        # Vérifier si les configurations email existent
+        smtp_server = os.getenv('SMTP_SERVER') or st.secrets.get("email", {}).get("smtp_server")
+        smtp_port = os.getenv('SMTP_PORT') or st.secrets.get("email", {}).get("smtp_port", 587)
+        smtp_username = os.getenv('SMTP_USERNAME') or st.secrets.get("email", {}).get("username")
+        smtp_password = os.getenv('SMTP_PASSWORD') or st.secrets.get("email", {}).get("password")
+        from_email = os.getenv('FROM_EMAIL') or st.secrets.get("email", {}).get("from_email", "noreply@sygep.ma")
+        
+        # Si pas de configuration, simuler l'envoi (mode développement)
+        if not all([smtp_server, smtp_username, smtp_password]):
+            print(f"📧 [MODE SIMULATION] Email à {to_email}")
+            print(f"   Sujet: {subject}")
+            print(f"   Contenu: {body_html[:100]}...")
+            return True  # Simulation réussie
+        
+        # Créer le message
+        message = MIMEMultipart("alternative")
+        message["Subject"] = subject
+        message["From"] = from_email
+        message["To"] = to_email
+        
+        # Créer le corps HTML
+        html_part = MIMEText(body_html, "html")
+        message.attach(html_part)
+        
+        # Connexion et envoi
+        with smtplib.SMTP(smtp_server, int(smtp_port)) as server:
+            server.starttls()
+            server.login(smtp_username, smtp_password)
+            server.send_message(message)
+        
+        print(f"✅ Email envoyé avec succès à {to_email}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Erreur envoi email: {e}")
+        return False
+
+def generer_email_confirmation_commande(client_nom, produit_nom, quantite, montant, numero_commande, statut):
+    """Génère le HTML de l'email de confirmation"""
+    
+    if statut == "En cours":
+        titre = "Commande validée et en préparation"
+        message_statut = "Votre commande a été <strong>validée</strong> par notre équipe et est actuellement <strong>en préparation</strong>."
+        couleur = "#28a745"
+    elif statut == "Livrée":
+        titre = "Commande livrée"
+        message_statut = "Votre commande a été <strong>livrée avec succès</strong>."
+        couleur = "#007bff"
+    elif statut == "Annulée":
+        titre = "Commande annulée"
+        message_statut = "Nous sommes désolés, votre commande a été <strong>annulée</strong>."
+        couleur = "#dc3545"
+    else:
+        titre = "Commande reçue"
+        message_statut = "Votre commande a été <strong>reçue</strong> et est en attente de validation."
+        couleur = "#ffc107"
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }}
+            .content {{ background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px; }}
+            .info-box {{ background: white; padding: 20px; margin: 20px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
+            .statut {{ display: inline-block; padding: 8px 16px; background: {couleur}; color: white; border-radius: 20px; font-weight: bold; }}
+            .details {{ margin: 15px 0; }}
+            .details-row {{ display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #e9ecef; }}
+            .footer {{ text-align: center; margin-top: 30px; padding-top: 20px; border-top: 2px solid #e9ecef; color: #6c757d; font-size: 12px; }}
+            .button {{ display: inline-block; padding: 12px 30px; background: #667eea; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🎓 SYGEP</h1>
+                <p style="margin: 10px 0 0 0; font-size: 14px;">Système de Gestion d'Entreprise Pédagogique</p>
+            </div>
+            
+            <div class="content">
+                <h2 style="color: #333; margin-bottom: 10px;">Bonjour {client_nom},</h2>
+                
+                <p>{message_statut}</p>
+                
+                <div class="info-box">
+                    <p style="margin: 0 0 10px 0;"><strong>Statut actuel :</strong> <span class="statut">{statut.upper()}</span></p>
+                    
+                    <div class="details">
+                        <div class="details-row">
+                            <span><strong>N° de commande</strong></span>
+                            <span>#{numero_commande}</span>
+                        </div>
+                        <div class="details-row">
+                            <span><strong>Produit</strong></span>
+                            <span>{produit_nom}</span>
+                        </div>
+                        <div class="details-row">
+                            <span><strong>Quantité</strong></span>
+                            <span>{quantite}</span>
+                        </div>
+                        <div class="details-row" style="border-bottom: none;">
+                            <span><strong>Montant total</strong></span>
+                            <span style="color: {couleur}; font-size: 18px; font-weight: bold;">{montant:.2f} €</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <p style="margin-top: 20px;">Pour toute question concernant votre commande, n'hésitez pas à nous contacter.</p>
+                
+                <div class="footer">
+                    <p><strong>IFMLT ZENATA - OFPPT</strong></p>
+                    <p>📧 Email: contact@sygep.ma | 📞 Tél: +212 5XX XX XX XX</p>
+                    <p style="margin-top: 15px; font-size: 11px;">
+                        Cet email a été généré automatiquement, merci de ne pas y répondre.<br>
+                        © 2024 SYGEP - Tous droits réservés
+                    </p>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return html
+
 # ========== GESTION CONNEXION POSTGRESQL (SUPABASE) ==========
 
 @st.cache_resource
@@ -27,23 +169,25 @@ def init_connection_pool():
     """Initialise un pool de connexions PostgreSQL"""
     try:
         connection_pool = psycopg2.pool.SimpleConnectionPool(
-            1, 20,
+            1, 10,  # Réduit de 20 à 10 connexions max
             host=os.getenv('SUPABASE_HOST'),
             database=os.getenv('SUPABASE_DB', 'postgres'),
             user=os.getenv('SUPABASE_USER', 'postgres'),
             password=os.getenv('SUPABASE_PASSWORD'),
-            port=os.getenv('SUPABASE_PORT', '5432')
+            port=os.getenv('SUPABASE_PORT', '5432'),
+            connect_timeout=10  # Timeout de 10 secondes
         )
         return connection_pool
     except Exception as e:
         try:
             connection_pool = psycopg2.pool.SimpleConnectionPool(
-                1, 20,
+                1, 10,
                 host=st.secrets["supabase"]["host"],
                 database=st.secrets["supabase"]["database"],
                 user=st.secrets["supabase"]["user"],
                 password=st.secrets["supabase"]["password"],
-                port=st.secrets["supabase"]["port"]
+                port=st.secrets["supabase"]["port"],
+                connect_timeout=10
             )
             return connection_pool
         except Exception as e2:
@@ -51,12 +195,36 @@ def init_connection_pool():
             st.stop()
 
 def get_connection():
+    """Obtient une connexion depuis le pool avec retry"""
     pool = init_connection_pool()
-    return pool.getconn()
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            conn = pool.getconn()
+            if conn:
+                return conn
+        except Exception as e:
+            if attempt == max_retries - 1:
+                st.error(f"❌ Impossible d'obtenir une connexion après {max_retries} tentatives")
+                raise
+            import time
+            time.sleep(0.5)  # Attendre 0.5s avant de réessayer
+    return None
 
 def release_connection(conn):
-    pool = init_connection_pool()
-    pool.putconn(conn)
+    """Libère une connexion vers le pool avec gestion d'erreur"""
+    try:
+        if conn:
+            pool = init_connection_pool()
+            pool.putconn(conn)
+    except Exception as e:
+        print(f"Erreur libération connexion: {e}")
+        # Fermer la connexion manuellement si le pool ne fonctionne pas
+        try:
+            if conn:
+                conn.close()
+        except:
+            pass
 
 # ========== INITIALISATION BASE DE DONNÉES ==========
 def init_database():
@@ -1324,19 +1492,28 @@ elif menu == "Gestion des Commandes":
                             try:
                                 c = conn.cursor()
                                 
-                                # Récupérer les infos de la commande
-                                c.execute("SELECT statut, produit_id, quantite FROM commandes WHERE id = %s", (int(cmd_id),))
+                                # Récupérer les infos complètes de la commande avec client et produit
+                                c.execute("""
+                                    SELECT c.statut, c.produit_id, c.quantite, cl.nom, cl.email, p.nom, p.prix
+                                    FROM commandes c
+                                    JOIN clients cl ON c.client_id = cl.id
+                                    JOIN produits p ON c.produit_id = p.id
+                                    WHERE c.id = %s
+                                """, (int(cmd_id),))
                                 cmd_data = c.fetchone()
                                 
                                 if cmd_data:
                                     ancien_statut = cmd_data[0]
                                     produit_id = int(cmd_data[1])
                                     quantite = int(cmd_data[2])
+                                    client_nom = cmd_data[3]
+                                    client_email = cmd_data[4]
+                                    produit_nom = cmd_data[5]
+                                    produit_prix = float(cmd_data[6])
+                                    montant_total = produit_prix * quantite
                                     
                                     # Logique de décrémentation du stock
-                                    # Décrémenter uniquement si on passe de "En attente" à "En cours" ou "Livrée"
                                     if ancien_statut == "En attente" and statut in ["En cours", "Livrée"]:
-                                        # Vérifier le stock disponible
                                         c.execute("SELECT stock FROM produits WHERE id = %s", (produit_id,))
                                         stock_result = c.fetchone()
                                         
@@ -1366,6 +1543,30 @@ elif menu == "Gestion des Commandes":
                                     
                                     log_access(st.session_state.user_id, "commandes", f"MAJ statut ID:{cmd_id} -> {statut}")
                                     st.success(f"✅ Statut changé: {statut}")
+                                    
+                                    # Envoyer l'email de notification au client
+                                    if client_email and statut != ancien_statut:
+                                        with st.spinner("📧 Envoi de l'email au client..."):
+                                            sujet = f"SYGEP - Mise à jour de votre commande #{cmd_id}"
+                                            corps_html = generer_email_confirmation_commande(
+                                                client_nom, 
+                                                produit_nom, 
+                                                quantite, 
+                                                montant_total, 
+                                                cmd_id, 
+                                                statut
+                                            )
+                                            
+                                            email_envoye = send_email_notification(
+                                                client_email, 
+                                                sujet, 
+                                                corps_html
+                                            )
+                                            
+                                            if email_envoye:
+                                                st.success(f"📧 Email de confirmation envoyé à {client_email}")
+                                            else:
+                                                st.warning(f"⚠️ Email non envoyé (vérifiez la configuration SMTP)")
                                     
                                     if statut != 'En attente':
                                         get_pending_orders_count.clear()
