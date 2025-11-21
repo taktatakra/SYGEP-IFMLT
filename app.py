@@ -27,23 +27,25 @@ def init_connection_pool():
     """Initialise un pool de connexions PostgreSQL"""
     try:
         connection_pool = psycopg2.pool.SimpleConnectionPool(
-            1, 20,
+            1, 10,  # Réduit de 20 à 10 connexions max
             host=os.getenv('SUPABASE_HOST'),
             database=os.getenv('SUPABASE_DB', 'postgres'),
             user=os.getenv('SUPABASE_USER', 'postgres'),
             password=os.getenv('SUPABASE_PASSWORD'),
-            port=os.getenv('SUPABASE_PORT', '5432')
+            port=os.getenv('SUPABASE_PORT', '5432'),
+            connect_timeout=10  # Timeout de 10 secondes
         )
         return connection_pool
     except Exception as e:
         try:
             connection_pool = psycopg2.pool.SimpleConnectionPool(
-                1, 20,
+                1, 10,
                 host=st.secrets["supabase"]["host"],
                 database=st.secrets["supabase"]["database"],
                 user=st.secrets["supabase"]["user"],
                 password=st.secrets["supabase"]["password"],
-                port=st.secrets["supabase"]["port"]
+                port=st.secrets["supabase"]["port"],
+                connect_timeout=10
             )
             return connection_pool
         except Exception as e2:
@@ -51,12 +53,36 @@ def init_connection_pool():
             st.stop()
 
 def get_connection():
+    """Obtient une connexion depuis le pool avec retry"""
     pool = init_connection_pool()
-    return pool.getconn()
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            conn = pool.getconn()
+            if conn:
+                return conn
+        except Exception as e:
+            if attempt == max_retries - 1:
+                st.error(f"❌ Impossible d'obtenir une connexion après {max_retries} tentatives")
+                raise
+            import time
+            time.sleep(0.5)  # Attendre 0.5s avant de réessayer
+    return None
 
 def release_connection(conn):
-    pool = init_connection_pool()
-    pool.putconn(conn)
+    """Libère une connexion vers le pool avec gestion d'erreur"""
+    try:
+        if conn:
+            pool = init_connection_pool()
+            pool.putconn(conn)
+    except Exception as e:
+        print(f"Erreur libération connexion: {e}")
+        # Fermer la connexion manuellement si le pool ne fonctionne pas
+        try:
+            if conn:
+                conn.close()
+        except:
+            pass
 
 # ========== INITIALISATION BASE DE DONNÉES ==========
 def init_database():
@@ -334,20 +360,26 @@ def save_session_to_db(user_id, username, role):
         release_connection(conn)
 
 def load_session_from_db(session_id):
-    conn = get_connection()
+    """Charge une session depuis la base de données avec gestion d'erreur"""
     try:
-        c = conn.cursor()
-        c.execute("""SELECT user_id, username, role FROM sessions 
-                     WHERE session_id=%s AND last_activity > NOW() - INTERVAL '1 day'""",
-                  (session_id,))
-        result = c.fetchone()
-        
-        if result:
-            c.execute("UPDATE sessions SET last_activity=NOW() WHERE session_id=%s", (session_id,))
-            conn.commit()
-        return result
-    finally:
-        release_connection(conn)
+        conn = get_connection()
+        try:
+            c = conn.cursor()
+            c.execute("""SELECT user_id, username, role FROM sessions 
+                         WHERE session_id=%s AND last_activity > NOW() - INTERVAL '1 day'""",
+                      (session_id,))
+            result = c.fetchone()
+            
+            if result:
+                c.execute("UPDATE sessions SET last_activity=NOW() WHERE session_id=%s", (session_id,))
+                conn.commit()
+            return result
+        finally:
+            release_connection(conn)
+    except Exception as e:
+        # En cas d'erreur de connexion, retourner None pour forcer une nouvelle connexion
+        print(f"Erreur chargement session: {e}")
+        return None
 
 def delete_session_from_db(session_id):
     conn = get_connection()
